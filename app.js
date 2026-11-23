@@ -13,7 +13,8 @@ const MOCK = new URLSearchParams(location.search).has('mock');
 // ───────── 기본값 ─────────
 const MARKETS = {
   futures: { rest: 'https://fapi.binance.com/fapi/v1', ws: 'wss://fstream.binance.com', badge: '선물' },
-  spot:    { rest: 'https://api.binance.com/api/v3',  ws: 'wss://stream.binance.com:9443', badge: '현물' }
+  spot:    { rest: 'https://api.binance.com/api/v3',  ws: 'wss://stream.binance.com:9443', badge: '현물' },
+  upbit:   { rest: 'https://api.upbit.com/v1',        ws: 'wss://api.upbit.com/websocket/v1', badge: '업비트' }
 };
 const TFS = {
   '1m':[{type:'minute',span:1},6e4], '3m':[{type:'minute',span:3},18e4], '5m':[{type:'minute',span:5},3e5],
@@ -120,6 +121,7 @@ const fmtTime = ts => new Date(ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seo
 const decimalsOf = s => { s = String(s); if (!s.includes('.')) return 0; return s.replace(/0+$/, '').split('.')[1]?.length || 0; };
 const fmtPrice = (p, d) => Number(p).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const trimNum = s => { s = String(s); return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s; };
+const fmtKrw = v => v >= 1e12 ? (v / 1e12).toFixed(1) + '조' : v >= 1e8 ? Math.round(v / 1e8).toLocaleString() + '억' : Math.round(v / 1e4).toLocaleString() + '만';
 const fmtBig = v => v >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(0) + 'K' : Math.round(v) + '';
 const tfOfPeriod = p => Object.keys(TFS).find(k => TFS[k][0].type === p.type && TFS[k][0].span === p.span);
 const hexA = (hex, a) => { const h = hex.replace('#', ''); const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
@@ -128,7 +130,8 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 // ───────── 데이터 (Binance REST / WS) ─────────
 const toBar = k => ({ timestamp: k[0], open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5], turnover: +k[7] });
 async function fetchKlines(market, symbol, tf, { startTime, endTime, limit = LIMIT } = {}) {
-  if (MOCK) return mockKlines(symbol, tf, { startTime, endTime, limit });
+  if (MOCK) return mockKlines(symbol, tf, { startTime, endTime, limit: market === 'upbit' ? Math.min(limit, batchSize(market, tf)) : limit });
+  if (market === 'upbit') return upbitKlines(symbol, tf, { startTime, endTime });
   const q = new URLSearchParams({ symbol, interval: tf, limit });
   if (startTime != null) q.set('startTime', startTime);
   if (endTime != null) q.set('endTime', endTime);
@@ -136,10 +139,102 @@ async function fetchKlines(market, symbol, tf, { startTime, endTime, limit = LIM
   if (!r.ok) throw new Error(r.status === 400 ? '종목 이름을 확인해 주세요' : `HTTP ${r.status}`);
   return (await r.json()).map(toBar);
 }
+// 한 번에 받는 봉 개수 (이보다 적게 오면 더 이전/이후 데이터가 없다는 뜻)
+function batchSize(market, tf) { return market === 'upbit' ? Math.floor(200 / (UPBIT_TF[tf] ? UPBIT_TF[tf][1] : 1)) - 1 : LIMIT; }
+
+// ───────── 업비트 ─────────
+// 브라우저에서 부르는 업비트 REST는 약 10초에 1번으로 제한돼서, 과거 캔들만 REST로 아껴 받고
+// 실시간 가격·캔들·목록은 전부 웹소켓으로 받음
+const UPBIT_TF = { // 우리 타임프레임 → [업비트 캔들 종류, 몇 개를 합칠지]
+  '1m': ['minutes/1', 1], '3m': ['minutes/3', 1], '5m': ['minutes/5', 1], '15m': ['minutes/15', 1], '30m': ['minutes/30', 1],
+  '1h': ['minutes/60', 1], '2h': ['minutes/60', 2], '4h': ['minutes/240', 1], '6h': ['minutes/60', 6], '12h': ['minutes/240', 3],
+  '1d': ['days', 1], '1w': ['weeks', 1], '1M': ['months', 1]
+};
+const UPBIT_WS_CANDLE = { '1m': 'candle.1m', '3m': 'candle.3m', '5m': 'candle.5m', '15m': 'candle.15m', '30m': 'candle.30m', '1h': 'candle.60m', '4h': 'candle.240m' };
+const upbitQ = { chain: Promise.resolve(), last: 0, waitedToast: 0 };
+function upbitGet(path) {
+  const run = async () => {
+    for (let i = 0; i < 14; i++) {
+      const wait = upbitQ.last + 300 - Date.now(); if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      upbitQ.last = Date.now();
+      const r = await fetch(`${MARKETS.upbit.rest}${path}`);
+      if (r.status === 429) {
+        if (Date.now() - upbitQ.waitedToast > 8000) { upbitQ.waitedToast = Date.now(); toast('업비트 요청 제한으로 잠깐 기다리는 중…', 3000); }
+        await new Promise(r => setTimeout(r, 2000)); continue;
+      }
+      if (!r.ok) throw new Error(r.status === 404 ? '업비트 종목 이름을 확인해 주세요 (예: KRW-BTC)' : `HTTP ${r.status}`);
+      return r.json();
+    }
+    throw new Error('업비트 요청이 너무 많아요. 잠시 후 다시 시도해 주세요');
+  };
+  const p = upbitQ.chain.then(run, run);
+  upbitQ.chain = p.catch(() => {});
+  return p;
+}
+const isoSec = ts => new Date(ts).toISOString().slice(0, 19) + 'Z';
+const upbitBar = x => ({ timestamp: Date.parse(x.candle_date_time_utc + 'Z'), open: +x.opening_price, high: +x.high_price, low: +x.low_price, close: +x.trade_price, volume: +x.candle_acc_trade_volume, turnover: +x.candle_acc_trade_price });
+function barStart(ts, tf) {
+  if (tf === '1M') { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); }
+  if (tf === '1w') return Math.floor((ts - 4 * 864e5) / 6048e5) * 6048e5 + 4 * 864e5; // 월요일 00:00 UTC
+  const ms = TFS[tf][1]; return Math.floor(ts / ms) * ms;
+}
+function aggregate(bars, tf) {
+  const out = [];
+  for (const b of bars) {
+    const t = barStart(b.timestamp, tf), last = out[out.length - 1];
+    if (last && last.timestamp === t) { last.high = Math.max(last.high, b.high); last.low = Math.min(last.low, b.low); last.close = b.close; last.volume += b.volume; last.turnover += b.turnover; }
+    else out.push({ ...b, timestamp: t });
+  }
+  return out;
+}
+async function upbitKlines(code, tf, { startTime, endTime }) {
+  const [path, n] = UPBIT_TF[tf], baseMs = n > 1 ? TFS[tf][1] / n : TFS[tf][1];
+  let to;
+  if (startTime != null) to = Math.min(Date.now(), startTime + 200 * baseMs);      // 리플레이: 시작점 이후 200개
+  else if (endTime != null) to = endTime + 1000;                                     // 과거로 스크롤
+  const q = `/candles/${path}?market=${encodeURIComponent(code)}&count=200${to ? '&to=' + isoSec(to) : ''}`;
+  let bars = (await upbitGet(q)).map(upbitBar).reverse();
+  if (n > 1) bars = aggregate(bars, tf);
+  if (startTime != null) bars = bars.filter(b => b.timestamp >= startTime);
+  if (endTime != null) bars = bars.filter(b => b.timestamp <= endTime);
+  return bars;
+}
+// 웹소켓으로 현재가 한 번 받기 (REST 제한 피하기)
+function upbitSnapshot(codes) {
+  return new Promise(resolve => {
+    const out = {}; let ws;
+    const done = () => { try { ws.close(); } catch {} resolve(out); };
+    const timer = setTimeout(done, 2500);
+    try { ws = new WebSocket(MARKETS.upbit.ws); } catch { clearTimeout(timer); return resolve(out); }
+    ws.onopen = () => ws.send(JSON.stringify([{ ticket: 'snap' + Date.now() }, { type: 'ticker', codes, isOnlySnapshot: true }]));
+    ws.onmessage = async e => {
+      try { const d = JSON.parse(typeof e.data === 'string' ? e.data : await e.data.text()); out[d.code] = d; if (Object.keys(out).length >= codes.length) { clearTimeout(timer); done(); } } catch {}
+    };
+    ws.onerror = () => { clearTimeout(timer); done(); };
+  });
+}
+function upbitPrecision(code, price) {
+  if (code.startsWith('BTC-')) return 8;
+  if (code.startsWith('USDT-')) return price >= 100 ? 2 : price >= 1 ? 3 : 6;
+  return price >= 1000 ? 0 : price >= 100 ? 1 : price >= 10 ? 2 : price >= 1 ? 3 : price >= 0.1 ? 4 : 5;
+}
+async function upbitMarkets() {
+  const c = LS.get('upbit:markets', null);
+  if (c && Date.now() - c.t < 864e5) return c.list;
+  const list = (await upbitGet('/market/all?isDetails=false')).map(m => ({ s: m.market, n: m.korean_name }));
+  LS.set('upbit:markets', { t: Date.now(), list });
+  return list;
+}
 const infoCache = {};
 async function symbolInfo(market, symbol) {
   const key = market + ':' + symbol;
   if (infoCache[key]) return infoCache[key];
+  if (market === 'upbit') {
+    let pp = 0;
+    if (!MOCK) { const s = (await upbitSnapshot([symbol]))[symbol]; if (s) pp = upbitPrecision(symbol, +s.trade_price); }
+    else pp = 2;
+    return (infoCache[key] = { pp, vp: 4 });
+  }
   if (!MOCK) {
     try {
       const url = market === 'spot' ? `${MARKETS.spot.rest}/exchangeInfo?symbol=${symbol}` : `${MARKETS.futures.rest}/exchangeInfo`;
@@ -161,8 +256,12 @@ async function loadTickers(market) {
   if (c && Date.now() - c.t < 30000) return c.list;
   let list = [];
   if (MOCK) {
-    list = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','SUIUSDT','TRXUSDT','DOTUSDT','LTCUSDT','PEPEUSDT','WIFUSDT']
-      .map((s, i) => ({ s, p: trimNum((60000 / (i + 1)).toFixed(3)), chg: Math.sin(i * 3) * 6, qv: 1e10 / (i + 1) }));
+    list = (market === 'upbit' ? ['KRW-BTC','KRW-ETH','KRW-XRP','KRW-SOL','KRW-DOGE'] : ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','SUIUSDT','TRXUSDT','DOTUSDT','LTCUSDT','PEPEUSDT','WIFUSDT'])
+      .map((s, i) => ({ s, n: market === 'upbit' ? ['비트코인','이더리움','리플','솔라나','도지코인'][i] : '', p: trimNum((60000 / (i + 1)).toFixed(3)), chg: Math.sin(i * 3) * 6, qv: 1e10 / (i + 1) }));
+  } else if (market === 'upbit') {
+    const mk = (await upbitMarkets()).filter(m => m.s.startsWith('KRW-'));
+    const snap = await upbitSnapshot(mk.map(m => m.s));
+    list = mk.filter(m => snap[m.s]).map(m => { const x = snap[m.s]; return { s: m.s, n: m.n, p: trimNum(x.trade_price), chg: x.signed_change_rate * 100, qv: +x.acc_trade_price_24h }; });
   } else {
     const arr = await (await fetch(`${MARKETS[market].rest}/ticker/24hr`)).json();
     list = arr.filter(x => !x.symbol.includes('_') && +x.quoteVolume > 0)
@@ -172,13 +271,13 @@ async function loadTickers(market) {
   tickerCache[market] = { t: Date.now(), list };
   return list;
 }
-function openWS(url, onMsg, onReopen) {
+function openWS(url, onMsg, onReopen, sub) {
   const h = { ws: null, closed: false, timer: null, dropped: false };
   const connect = () => {
     if (h.closed) return;
     h.ws = new WebSocket(url);
-    h.ws.onopen = () => { if (h.dropped && onReopen) onReopen(); h.dropped = false; };
-    h.ws.onmessage = e => { try { onMsg(JSON.parse(e.data)); } catch {} };
+    h.ws.onopen = () => { if (sub) h.ws.send(JSON.stringify(sub)); if (h.dropped && onReopen) onReopen(); h.dropped = false; };
+    h.ws.onmessage = async e => { try { const d = typeof e.data === 'string' ? e.data : await e.data.text(); onMsg(JSON.parse(d)); } catch {} };
     h.ws.onclose = () => { if (!h.closed) { h.dropped = true; h.timer = setTimeout(connect, 2000); } };
     h.ws.onerror = () => { try { h.ws.close(); } catch {} };
   };
@@ -314,7 +413,7 @@ class Cell {
           if (type === 'init') data = await fetchKlines(symbol.market, symbol.ticker, tf);
           else if (type === 'forward') data = await fetchKlines(symbol.market, symbol.ticker, tf, { endTime: timestamp - 1 });
           if (tok !== self.token()) return;
-          callback(data, { forward: data.length >= LIMIT, backward: false });
+          callback(data, { forward: data.length >= batchSize(symbol.market, tf), backward: false });
           if (type === 'init') self.afterInit(data);
         } catch (e) { if (tok === self.token()) { toast('데이터 로드 실패: ' + e.message, 4000); callback([], false); } }
       },
@@ -326,6 +425,21 @@ class Cell {
           const k = mockK(symbol.ticker);
           const id = setInterval(() => { const ts = Math.floor(Date.now() / ms) * ms; const b = mockBar(ts, ms, k); b.close = mockPrice(Date.now(), k); b.high = Math.max(b.high, b.close); b.low = Math.min(b.low, b.close); push(b); }, 1000);
           self.ws = { close: () => clearInterval(id) };
+          return;
+        }
+        if (symbol.market === 'upbit') {
+          const code = symbol.ticker, ctype = UPBIT_WS_CANDLE[tf];
+          let cur = self.lastBar ? { ...self.lastBar } : null;
+          self.ws = openWS(MARKETS.upbit.ws, m => {
+            if (m.code !== code) return;
+            if (ctype && m.type === ctype) { const b = upbitBar(m); cur = b; push({ ...b }); return; }
+            if (m.type !== 'trade') return;
+            const p = +m.trade_price, t = barStart(m.trade_timestamp, tf);
+            if (!cur || t > cur.timestamp) cur = { timestamp: t, open: p, high: p, low: p, close: p, volume: 0, turnover: 0 };
+            else if (t < cur.timestamp) return;
+            cur.high = Math.max(cur.high, p); cur.low = Math.min(cur.low, p); cur.close = p; cur.volume += +m.trade_volume; cur.turnover += p * m.trade_volume;
+            push({ ...cur });
+          }, null, [{ ticket: 'chart' + Date.now() }, ctype ? { type: ctype, codes: [code] } : { type: 'trade', codes: [code], isOnlyRealtime: true }]);
           return;
         }
         self.ws = openWS(`${MARKETS[symbol.market].ws}/ws/${symbol.ticker.toLowerCase()}@kline_${tf}`,
@@ -342,13 +456,13 @@ class Cell {
             const past = await fetchKlines(symbol.market, symbol.ticker, tf, { endTime: R.T - ms }); // 리플레이 시점 이전에 완성된 봉만
             if (tok !== self.token()) return;
             Object.assign(self.rp, { buffer: [], done: false, fetching: false, fetchedTo: past.length ? past[past.length - 1].timestamp : R.T - ms });
-            callback(past, { forward: past.length >= LIMIT, backward: false });
+            callback(past, { forward: past.length >= batchSize(symbol.market, tf), backward: false });
             self.afterInit(past);
             self.refill();
           } else if (type === 'forward') {
             const data = await fetchKlines(symbol.market, symbol.ticker, tf, { endTime: timestamp - 1 });
             if (tok !== self.token()) return;
-            callback(data, { forward: data.length >= LIMIT, backward: false });
+            callback(data, { forward: data.length >= batchSize(symbol.market, tf), backward: false });
           } else callback([], false);
         } catch (e) { if (tok === self.token()) { toast('데이터 로드 실패: ' + e.message, 4000); callback([], false); } }
       },
@@ -393,7 +507,7 @@ class Cell {
   }
   setSymbol(market, symbol) { this.st.market = market; this.st.symbol = symbol; this.applySymbol(); this.label(); }
   setTf(tf) { this.st.tf = tf; this.chart.setPeriod(TFS[tf][0]); this.label(); }
-  label() { this.lb.textContent = `${this.st.symbol} · ${this.st.tf}${this.st.market === 'spot' ? ' · 현물' : ''}`; }
+  label() { this.lb.textContent = `${this.st.symbol} · ${this.st.tf}${this.st.market === 'spot' ? ' · 현물' : this.st.market === 'upbit' ? ' · 업비트' : ''}`; }
 
   // 리플레이
   async refill() {
@@ -407,7 +521,7 @@ class Cell {
       const full = data.filter(b => b.timestamp + ms <= now);
       rp.buffer.push(...full);
       if (data.length) rp.fetchedTo = data[data.length - 1].timestamp;
-      if (data.length < LIMIT || full.length < data.length) rp.done = true;
+      if (data.length < batchSize(st.market, st.tf) || full.length < data.length) rp.done = true;
     } catch { toast('리플레이 데이터 로드 실패'); }
     finally { if (tok === this.token()) { rp.fetching = false; this.advanceTo(R.T); } }
   }
@@ -548,7 +662,7 @@ class Cell {
     this.applyAxis();
     this.el.style.background = s.bg || 'var(--bg)';
   }
-  titleTpl() { return `{ticker}${this.st.market === 'futures' ? ' 무기한' : ''} · {period} · 바이낸스${this.st.market === 'spot' ? ' 현물' : ''}`; }
+  titleTpl() { const m = this.st.market; return m === 'upbit' ? '{ticker} · {period} · 업비트' : `{ticker}${m === 'futures' ? ' 무기한' : ''} · {period} · 바이낸스${m === 'spot' ? ' 현물' : ''}`; }
   // 상태 표시줄 (차트 왼쪽 위)
   statusLegend(data) {
     const k = data && data.current; if (!k) return [];
@@ -570,6 +684,7 @@ class Cell {
   async fetch24() {
     const st = this.st, key = st.market + st.symbol;
     if (MOCK) { this.open24 = null; return; }
+    if (st.market === 'upbit') { const x = (await upbitSnapshot([st.symbol]))[st.symbol]; if (x && key === this.st.market + this.st.symbol) this.open24 = +x.prev_closing_price; return; }
     try {
       const x = await (await fetch(`${MARKETS[st.market].rest}/ticker/24hr?symbol=${st.symbol}`)).json();
       if (key === this.st.market + this.st.symbol && x && x.openPrice) this.open24 = +x.openPrice;
@@ -740,15 +855,16 @@ async function renderSymList() {
   try { list = await loadTickers(symMarket); }
   catch { box.innerHTML = `<div style="padding:14px;color:var(--muted)">목록을 못 불러왔어요. 이름을 정확히 입력하고 Enter를 눌러도 돼요.</div>`; symRows = []; return; }
   const q = $('#symSearch').value.trim().toUpperCase();
-  let rows = q ? list.filter(x => x.s.includes(q)) : list;
+  const qr = $('#symSearch').value.trim();
+  let rows = q ? list.filter(x => x.s.includes(q) || (x.n && x.n.includes(qr))) : list;
   if (q) rows = rows.slice().sort((a, b) => (b.s.startsWith(q) - a.s.startsWith(q)) || (b.qv - a.qv));
   symRows = rows.slice(0, 300); symHl = 0;
   const inWl = s => watchlist.some(w => w.market === symMarket && w.symbol === s);
   box.innerHTML = symRows.map((x, i) => `<div class="sym-row ${i === 0 ? 'hl' : ''}" data-s="${x.s}">
     <span class="st ${inWl(x.s) ? 'on' : ''}" data-star="${x.s}" title="관심종목">${inWl(x.s) ? '★' : '☆'}</span>
-    <span class="n">${x.s}</span><span class="r">${x.p}</span>
+    <span class="n">${x.s}${x.n ? ` <small style="color:var(--muted);font-weight:400">${esc(x.n)}</small>` : ''}</span><span class="r">${x.p}</span>
     <span class="r ${x.chg >= 0 ? 'upc' : 'downc'}">${x.chg >= 0 ? '+' : ''}${x.chg.toFixed(2)}%</span>
-    <span class="r" style="color:var(--muted)">${fmtBig(x.qv)}</span></div>`).join('') ||
+    <span class="r" style="color:var(--muted)">${symMarket === 'upbit' ? fmtKrw(x.qv) : fmtBig(x.qv)}</span></div>`).join('') ||
     `<div style="padding:14px;color:var(--muted)">검색 결과 없음 — Enter로 "${esc(q)}" 열기</div>`;
 }
 function hlSym(i) {
@@ -1335,7 +1451,7 @@ function renderWatchlist() {
     const k = w.market + ':' + w.symbol, c = wlCells(wlPrices[k]);
     const cur = w.market === st.market && w.symbol === st.symbol;
     return `<div class="wl-row ${cur ? 'cur' : ''}" data-i="${i}" data-k="${k}">
-      <span class="sn"><span class="s">${w.symbol.replace(/USDT$/, '')}</span>${w.symbol.endsWith('USDT') ? '' : `<span class="m">${esc(w.symbol.replace(/^.*?(USDC|FDUSD|BTC|ETH|BNB)$/, '$1'))}</span>`}${w.market === 'spot' ? '<span class="m">현물</span>' : ''}</span>
+      <span class="sn">${w.market === 'upbit' ? `<span class="s">${esc(w.symbol.split('-')[1] || w.symbol)}</span><span class="m">${w.symbol.startsWith('KRW-') ? '원화' : esc(w.symbol.split('-')[0])}·업비트</span>` : `<span class="s">${w.symbol.replace(/USDT$/, '')}</span>${w.symbol.endsWith('USDT') ? '' : `<span class="m">${esc(w.symbol.replace(/^.*?(USDC|FDUSD|BTC|ETH|BNB)$/, '$1'))}</span>`}${w.market === 'spot' ? '<span class="m">현물</span>' : ''}`}</span>
       <span class="p">${c.p}</span><span class="a">${c.a}</span><span class="c">${c.r}</span>
       <button class="x" data-del="${i}" title="삭제">×</button></div>`;
   }).join('') || `<div style="padding:14px;color:var(--muted)">종목 검색창에서 ☆를 눌러 추가해요</div>`;
@@ -1368,6 +1484,11 @@ function connectWatchlist() {
       setWlPrice(market + ':' + d.s, d.c, +d.o, (d.c - d.o) / d.o * 100, +(d.c - d.o).toFixed(pp));
     }));
   }
+  const up = watchlist.filter(w => w.market === 'upbit').map(w => w.symbol);
+  if (up.length) wlSockets.push(openWS(MARKETS.upbit.ws, d => {
+    if (d.type !== 'ticker') return;
+    setWlPrice('upbit:' + d.code, d.trade_price, +d.prev_closing_price, d.signed_change_rate * 100, d.signed_change_price);
+  }, null, [{ ticket: 'wl' + Date.now() }, { type: 'ticker', codes: up }]));
 }
 // 실시간 연결이 안 들어오는 종목은 5초마다 직접 조회해서 채움
 if (MOCK) setInterval(() => watchlist.forEach((w, i) => { const base = 60000 / (i + 1), c = (base * (1 + Math.sin(Date.now() / 7000 + i) * 0.01)).toFixed(2); setWlPrice(w.market + ':' + w.symbol, c, base, (c - base) / base * 100, +(c - base).toFixed(2)); }), 1000);
@@ -1375,6 +1496,7 @@ async function pollWatchlist() {
   if (MOCK || document.hidden || !L || !L.wlOpen) return;
   const now = Date.now();
   for (const w of watchlist) {
+    if (w.market === 'upbit') continue;
     const k = w.market + ':' + w.symbol, p = wlPrices[k];
     if (p && now - p.t < 8000) continue;
     try {
