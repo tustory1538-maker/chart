@@ -74,10 +74,10 @@
   .wl-row,.wl-head{display:grid;grid-template-columns:1fr 78px 62px 58px 14px;gap:4px;align-items:center;padding:7px 8px 7px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
   .wl-head{cursor:default;font-size:11px;color:var(--muted);padding-top:5px;padding-bottom:5px} .wl-head span{text-align:right} .wl-head span:first-child{text-align:left}
   .wl-row .a{text-align:right;font-size:12px}
-  .wl-row .p{border-radius:3px;padding:0 2px}
-  .fl-up{animation:flu .7s ease-out} .fl-dn{animation:fld .7s ease-out}
-  @keyframes flu{0%{background:rgba(38,166,154,.55)}100%{background:transparent}}
-  @keyframes fld{0%{background:rgba(239,83,80,.55)}100%{background:transparent}}
+  .wl-row .p{color:var(--text)}
+  .wl-row .p.fl-up{animation:flu .8s ease-out} .wl-row .p.fl-dn{animation:fld .8s ease-out}
+  @keyframes flu{0%,45%{color:var(--up)}100%{color:var(--text)}}
+  @keyframes fld{0%,45%{color:var(--down)}100%{color:var(--text)}}
   .wl-row:hover{background:var(--panel2)} .wl-row.cur{background:var(--panel2)}
   .wl-row .s{font-weight:600} .m{font-size:10px;color:var(--muted);margin-left:3px} .wl-row .sn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .wl-row .p{text-align:right;font-variant-numeric:tabular-nums} .wl-row .c{text-align:right;font-variant-numeric:tabular-nums}

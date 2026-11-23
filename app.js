@@ -1297,7 +1297,7 @@ function renderWatchlist() {
     const cur = w.market === st.market && w.symbol === st.symbol;
     return `<div class="wl-row ${cur ? 'cur' : ''}" data-i="${i}" data-k="${k}">
       <span class="sn"><span class="s">${w.symbol.replace(/USDT$/, '')}</span>${w.symbol.endsWith('USDT') ? '' : `<span class="m">${esc(w.symbol.replace(/^.*?(USDC|FDUSD|BTC|ETH|BNB)$/, '$1'))}</span>`}${w.market === 'spot' ? '<span class="m">현물</span>' : ''}</span>
-      <span class="p ${c.cls}">${c.p}</span><span class="a ${c.cls}">${c.a}</span><span class="c ${c.cls}">${c.r}</span>
+      <span class="p">${c.p}</span><span class="a ${c.cls}">${c.a}</span><span class="c ${c.cls}">${c.r}</span>
       <button class="x" data-del="${i}" title="삭제">×</button></div>`;
   }).join('') || `<div style="padding:14px;color:var(--muted)">종목 검색창에서 ☆를 눌러 추가해요</div>`;
 }
@@ -1305,7 +1305,8 @@ function renderWatchlist() {
 function updateWl(k, prev) {
   const row = $('#wl').querySelector(`[data-k="${k}"]`); if (!row) return;
   const p = wlPrices[k], c = wlCells(p);
-  [['.p', c.p], ['.a', c.a], ['.c', c.r]].forEach(([sel, txt]) => { const e = row.querySelector(sel); e.textContent = txt; e.className = sel.slice(1) + ' ' + c.cls; });
+  [['.a', c.a], ['.c', c.r]].forEach(([sel, txt]) => { const e = row.querySelector(sel); e.textContent = txt; e.className = sel.slice(1) + ' ' + c.cls; });
+  row.querySelector('.p').textContent = c.p;
   if (prev != null && +p.c !== +prev) {
     const e = row.querySelector('.p');
     e.classList.remove('fl-up', 'fl-dn'); void e.offsetWidth;
