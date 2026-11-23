@@ -41,7 +41,7 @@ const DEF_SETTINGS = {
   theme: 'dark', chartType: 'candle_solid',
   bodyUp: '#26a69a', bodyDown: '#ef5350', borderShow: true, borderUp: '#26a69a', borderDown: '#ef5350', wickShow: true, wickUp: '#26a69a', wickDown: '#ef5350',
   compareRule: 'current_open', lastLine: true, highLow: true,
-  statusOHLC: 'auto', statusInd: 'auto',
+  statusOHLC: 'float', statusInd: 'auto',
   axisPos: 'right', scale: 'normal', invert: false, countdown: true,
   bg: '', gridV: true, gridH: true, gridColor: '', crossColor: '', textSize: 12, textColor: ''
 };
@@ -50,6 +50,7 @@ function migrateSettings(s) {
   if (s.up && !s.bodyUp) { s.bodyUp = s.borderUp = s.wickUp = s.up; }
   if (s.down && !s.bodyDown) { s.bodyDown = s.borderDown = s.wickDown = s.down; }
   if (s.grid === false && s.gridV == null) { s.gridV = s.gridH = false; }
+  if (!s.statusOHLC || s.statusOHLC === 'auto') s.statusOHLC = 'float';
   delete s.up; delete s.down; delete s.grid;
   return Object.assign(clone(DEF_SETTINGS), s);
 }
@@ -289,7 +290,13 @@ class Cell {
     this.chart = init(this.cv, { locale: 'ko-KR', timezone: 'Asia/Seoul' });
     this.ws = null; this.lastBar = null; this.pp = 2; this.crosshair = null; this.suppress = false; this.activeTool = null;
     this.rp = { buffer: [], fetchedTo: 0, done: false, fetching: false, cb: null };
-    this.chart.subscribeAction('onCrosshairChange', c => { this.crosshair = c; this.syncCrosshair(c); });
+    this.fb = document.createElement('div'); this.fb.className = 'fbox'; this.el.appendChild(this.fb);
+    this.ptr = null;
+    const trackPtr = e => { this.ptr = { x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch' }; };
+    this.el.addEventListener('pointermove', trackPtr, true);
+    this.el.addEventListener('pointerdown', e => { trackPtr(e); if (e.pointerType === 'touch') this.hideFloat(); }, true);
+    this.el.addEventListener('mouseleave', () => this.hideFloat());
+    this.chart.subscribeAction('onCrosshairChange', c => { this.crosshair = c; this.syncCrosshair(c); this.updateFloat(c); });
     this.chart.setFormatter({ formatExtendText: ({ data }) => {
       if (R.on || !data || !L.settings.countdown) return '';
       const left = closeTimeOf(data.timestamp, this.st.tf) - Date.now();
@@ -527,7 +534,7 @@ class Cell {
             extendTexts: [{ ...lastText, show: !!s.countdown, position: 'below_price', updateInterval: 1000, backgroundColor: null }]
           }
         },
-        tooltip: { showRule: rule(s.statusOHLC) }
+        tooltip: { showRule: s.statusOHLC === 'float' ? 'always' : rule(s.statusOHLC), legend: { template: s.statusOHLC === 'float' ? [] : [{ title: 'time', value: '{time}' }, { title: 'open', value: '{open}' }, { title: 'high', value: '{high}' }, { title: 'low', value: '{low}' }, { title: 'close', value: '{close}' }] } }
       },
       indicator: { tooltip: { showRule: rule(s.statusInd) }, bars: [{ upColor: hexA(s.bodyUp, 0.6), downColor: hexA(s.bodyDown, 0.6), noChangeColor: hexA(s.bodyUp, 0.6) }] },
       grid: { show: true, horizontal: { show: s.gridH, ...gc }, vertical: { show: s.gridV, ...gc } },
@@ -544,6 +551,30 @@ class Cell {
     panes.forEach(p => ch.overrideYAxis({ paneId: p, position: s.axisPos, ...(p === 'candle_pane' ? { name: s.scale, reverse: !!s.invert } : {}) }));
   }
 
+
+  // 트뷰처럼 십자선 옆에 뜨는 시고저종 박스
+  hideFloat() { this.fb.classList.remove('show'); }
+  updateFloat(c) {
+    if (L.settings.statusOHLC !== 'float' || !c || c.x == null || !this.ptr || picking) return this.hideFloat();
+    const pt = this.chart.convertFromPixel([{ x: c.x }], { paneId: 'candle_pane' })[0];
+    const list = this.chart.getDataList(), i = pt && pt.dataIndex != null ? Math.round(pt.dataIndex) : -1;
+    const k = list[i]; if (!k) return this.hideFloat();
+    const prev = list[i - 1], chg = prev ? (k.close - prev.close) / prev.close * 100 : (k.close - k.open) / k.open * 100;
+    const up = k.close >= k.open, col = up ? 'var(--up)' : 'var(--down)', f = v => fmtPrice(v, this.pp);
+    const row = (t, v, cl) => `<div class="fr"><span>${t}</span><b${cl ? ` style="color:${cl}"` : ''}>${v}</b></div>`;
+    this.fb.innerHTML = `<div class="fh">${fmtTime(k.timestamp)}</div>` +
+      row('시가', f(k.open), col) + row('고가', f(k.high), col) + row('저가', f(k.low), col) + row('종가', f(k.close), col) +
+      row('등락', (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%', chg >= 0 ? 'var(--up)' : 'var(--down)') +
+      row('진폭', ((k.high - k.low) / k.low * 100).toFixed(2) + '%');
+    this.fb.classList.add('show');
+    const r = this.el.getBoundingClientRect(), w = this.fb.offsetWidth, hh = this.fb.offsetHeight;
+    const px = this.ptr.x - r.left, py = this.ptr.y - r.top, gap = this.ptr.touch ? 36 : 16;
+    let left = px + gap; if (left + w > r.width - 72) left = px - gap - w;
+    let top = this.ptr.touch ? py - hh - gap : py + gap;
+    if (top < 4) top = py + gap;
+    if (top + hh > r.height - 28) top = Math.max(4, r.height - 28 - hh);
+    this.fb.style.left = Math.max(4, left) + 'px'; this.fb.style.top = top + 'px';
+  }
 
   // 십자선 동기화 (같은 시간 위치)
   syncCrosshair(c) {
@@ -1010,7 +1041,7 @@ const SET_TABS = [
     { type: 'check', k: 'highLow', label: '화면 안 최고가·최저가 표시' }
   ] },
   { id: 'status', t: '상태 표시줄', items: [
-    { type: 'select', k: 'statusOHLC', label: '종목·시고저종 정보', opts: STATUS_OPTS },
+    { type: 'select', k: 'statusOHLC', label: '시고저종 정보', opts: [['float', '플로팅 박스 (트뷰처럼, 십자선 옆)'], ['always', '차트 위쪽에 항상'], ['follow_cross', '차트 위쪽, 마우스 올릴 때만'], ['none', '숨김']] },
     { type: 'select', k: 'statusInd', label: '지표 값', opts: STATUS_OPTS }
   ] },
   { id: 'scale', t: '스케일', items: [
@@ -1143,7 +1174,7 @@ function bindDataTab() {
     try { await Sync.connect(t); renderSetModal(); toast('동기화 연결됨'); }
     catch (e) { $('#syncMsg').textContent = '⚠ ' + e.message; }
   };
-  if ($('#syncNow')) $('#syncNow').onclick = async () => { $('#syncMsg').textContent = '동기화 중…'; await Sync.pull(true); await Sync.push(); renderSetModal(); };
+  if ($('#syncNow')) $('#syncNow').onclick = async () => { $('#syncMsg').textContent = '동기화 중…'; await Sync.sync(true); renderSetModal(); };
   if ($('#syncOff')) $('#syncOff').onclick = () => { if (confirm('이 기기의 동기화를 끌까요? (저장된 데이터는 그대로)')) { Sync.disconnect(); renderSetModal(); } };
   $('#btnInstall').onclick = async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; renderSetModal(); };
   $('#btnExport').onclick = () => {
@@ -1373,24 +1404,27 @@ function applyWl() { $('#right').classList.toggle('hide', isMobile() ? mView !==
 
 // ───────── 기기 동기화 (깃허브 Gist에 저장) ─────────
 const Sync = (() => {
+  // 동기화 규칙: ① 항상 먼저 받아오고 그다음 올림 ② 시계 대신 버전 번호(v)로 판단
+  // ③ 저장 항목(관심종목·레이아웃·종목별 작도·도구 스타일…)마다 따로 비교해서 바뀐 것만 반영
+  // ④ 같은 항목을 양쪽에서 바꿨으면 나중에 바꾼 쪽 우선
   const SYNC_KEY = /^(layouts|layout:|draw:|watchlist|toolStyle:|groupCur)/; // curLayout은 기기마다 따로
   const FILE = 'my-chart-sync.json', DESC = 'my-chart sync (내 차트 동기화 데이터)';
   const API = 'https://api.github.com';
-  let busy = false, timer = null;
+  let busy = false, timer = null, timer2 = null, started = false, again = false;
   const api = { lastError: '' };
   const token = () => localStorage.getItem('sync:token') || '';
   const meta = () => LS.get('sync:meta', {});
   const setMeta = m => LS.set('sync:meta', { ...meta(), ...m });
+  const NONE = '∅';
+  const h = str => { if (str == null) return NONE; let x = 0; for (let i = 0; i < str.length; i++) x = (x * 31 + str.charCodeAt(i)) | 0; return x + ':' + str.length; };
   function collect() {
     const data = {};
-    const keys = [];
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (SYNC_KEY.test(k)) keys.push(k); }
-    keys.sort().forEach(k => { data[k] = localStorage.getItem(k); });
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (SYNC_KEY.test(k)) data[k] = localStorage.getItem(k); }
     return data;
   }
-  function hashOf(data) { const s = JSON.stringify(data); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h + ':' + s.length; }
+  const hashes = data => Object.fromEntries(Object.entries(data).map(([k, v]) => [k, h(v)]));
   async function gh(path, opt = {}, tk = token()) {
-    const r = await fetch(API + path, { ...opt, headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + tk, ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
+    const r = await fetch(API + path, { cache: 'no-store', ...opt, headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + tk, ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
     if (r.status === 401) throw new Error('토큰이 틀렸거나 만료됐어요');
     if (r.status === 403 || r.status === 404) throw new Error('토큰에 gist 권한이 없어요 (HTTP ' + r.status + ')');
     if (!r.ok) throw new Error('깃허브 응답 오류 (HTTP ' + r.status + ')');
@@ -1398,22 +1432,76 @@ const Sync = (() => {
   }
   async function readRemote(id) {
     const g = await gh('/gists/' + id);
-    const f = g.files && g.files[FILE]; if (!f) return null;
+    const f = g.files && g.files[FILE]; if (!f) return { v: 0, data: {}, at: {} };
     let text = f.content;
-    if (f.truncated && f.raw_url) text = await (await fetch(f.raw_url)).text();
-    return JSON.parse(text);
+    if (f.truncated && f.raw_url) text = await (await fetch(f.raw_url, { cache: 'no-store' })).text();
+    const j = JSON.parse(text);
+    return { v: j.v || 0, data: j.data || {}, at: j.at || {} };
   }
-  function apply(remote) {
-    const del = [];
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (SYNC_KEY.test(k)) del.push(k); }
-    del.forEach(k => localStorage.removeItem(k));
-    Object.entries(remote.data || {}).forEach(([k, v]) => { if (SYNC_KEY.test(k)) localStorage.setItem(k, v); });
-    setMeta({ lastHash: hashOf(collect()), lastSyncAt: remote.syncAt });
-    location.reload();
+  async function writeRemote(id, doc) {
+    await gh('/gists/' + id, { method: 'PATCH', body: JSON.stringify({ files: { [FILE]: { content: JSON.stringify({ app: 'my-chart', ...doc }) } } }) });
+  }
+  // 받아온 항목을 이 기기에 반영 (앱을 새로고침하지 않고 필요한 부분만 다시 그림)
+  function applyLocal(changes) {
+    const keys = Object.keys(changes); if (!keys.length) return;
+    keys.forEach(k => changes[k] == null ? localStorage.removeItem(k) : localStorage.setItem(k, changes[k]));
+    if (keys.includes('watchlist')) { watchlist = LS.get('watchlist', []); renderWatchlist(); connectWatchlist(); }
+    if (keys.includes('groupCur')) { Object.keys(groupCur).forEach(k => delete groupCur[k]); Object.assign(groupCur, LS.get('groupCur', {})); renderLeft(); }
+    if (keys.includes('layouts') || keys.includes('layout:' + curLayout)) {
+      layouts = LS.get('layouts', layouts);
+      if (!layouts.some(l => l.id === curLayout)) curLayout = layouts[0].id;
+      loadLayout(curLayout);
+    } else cells.forEach(c => { if (keys.includes(c.drawKey())) c.restoreDrawings(); });
+    toast('다른 기기 변경 내용을 받아왔어요');
+  }
+  // 한 번의 동기화: 받기 → 항목별 비교 → 이 기기 반영 → (바뀐 게 있으면) 올리기
+  async function sync(force) {
+    const m = meta(); if (!token() || !m.gistId) return;
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const remote = await readRemote(m.gistId);
+      const local = collect(), base = m.base || {}, dirtyAt = m.dirtyAt || {};
+      const now = Date.now();
+      const take = {}, merged = { ...remote.data }, at = { ...remote.at };
+      let push = false;
+      const keys = new Set([...Object.keys(local), ...Object.keys(remote.data), ...Object.keys(base)]);
+      for (const k of keys) {
+        const lv = local[k], rv = remote.data[k];
+        const lh = h(lv), rh = h(rv), bh = base[k] || NONE;
+        if (lh === rh) continue;
+        const lChanged = lh !== bh, rChanged = rh !== bh;
+        let useLocal;
+        if (lChanged && !rChanged) useLocal = true;
+        else if (rChanged && !lChanged) useLocal = false;
+        else useLocal = (dirtyAt[k] || 0) > (remote.at[k] || 0); // 둘 다 바뀜 → 나중에 바꾼 쪽
+        if (useLocal) { if (lv == null) delete merged[k]; else merged[k] = lv; at[k] = dirtyAt[k] || now; push = true; }
+        else take[k] = rv == null ? null : rv;
+      }
+      let ver = remote.v;
+      if (push) { ver = remote.v + 1; await writeRemote(m.gistId, { v: ver, at, data: merged }); }
+      applyLocal(take);
+      setMeta({ ver, base: hashes(merged), dirtyAt: {}, lastSyncAt: now });
+      api.lastError = '';
+      if (force) toast(push || Object.keys(take).length ? '동기화 완료' : '이미 최신이에요');
+    } catch (e) { api.lastError = e.message; if (force) toast('동기화 실패: ' + e.message); }
+    finally {
+      busy = false;
+      if (again) { again = false; setTimeout(() => sync(), 300); }
+    }
+  }
+  // 4초마다: 이 기기에서 바뀐 항목이 있으면 동기화 (먼저 받고 올림)
+  function tick() {
+    const m = meta(); if (!m.gistId || document.hidden) return;
+    const base = m.base || {}, local = collect(), dirtyAt = { ...(m.dirtyAt || {}) };
+    let dirty = false;
+    for (const k of new Set([...Object.keys(local), ...Object.keys(base)])) {
+      if (h(local[k]) !== (base[k] || NONE)) { dirty = true; if (!dirtyAt[k]) dirtyAt[k] = Date.now(); }
+    }
+    if (dirty) { setMeta({ dirtyAt }); sync(); }
   }
   async function connect(tk) {
     const user = await gh('/user', {}, tk);
-    // 이미 동기화용 Gist가 있는지 찾기
     let found = null;
     for (let page = 1; page <= 5 && !found; page++) {
       const list = await gh('/gists?per_page=100&page=' + page, {}, tk);
@@ -1425,49 +1513,45 @@ const Sync = (() => {
     if (found) {
       setMeta({ gistId: found.id, user: user.login });
       const remote = await readRemote(found.id);
-      if (remote && confirm('다른 기기에서 저장한 동기화 데이터가 있어요.\n\n[확인] 그 데이터를 이 기기로 가져오기\n[취소] 이 기기 데이터로 덮어쓰기')) { apply(remote); return; }
-      setMeta({ lastHash: '' });
-      await push();
+      if (confirm('다른 기기에서 저장한 동기화 데이터가 있어요.\n\n[확인] 그 데이터를 이 기기로 가져오기\n[취소] 이 기기 데이터로 덮어쓰기')) {
+        const local = collect(), take = {};
+        new Set([...Object.keys(local), ...Object.keys(remote.data)]).forEach(k => { if (local[k] !== remote.data[k]) take[k] = remote.data[k] ?? null; });
+        applyLocal(take);
+        setMeta({ ver: remote.v, base: hashes(remote.data), dirtyAt: {}, lastSyncAt: Date.now() });
+      } else {
+        const data = collect(), now = Date.now();
+        await writeRemote(found.id, { v: remote.v + 1, at: Object.fromEntries(Object.keys(data).map(k => [k, now])), data });
+        setMeta({ ver: remote.v + 1, base: hashes(data), dirtyAt: {}, lastSyncAt: now });
+      }
     } else {
-      const data = collect(), syncAt = Date.now();
-      const g = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: DESC, public: false, files: { [FILE]: { content: JSON.stringify({ app: 'my-chart', syncAt, data }) } } }) }, tk);
-      setMeta({ gistId: g.id, user: user.login, lastHash: hashOf(data), lastSyncAt: syncAt });
+      const data = collect(), now = Date.now();
+      const g = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: DESC, public: false, files: { [FILE]: { content: JSON.stringify({ app: 'my-chart', v: 1, at: Object.fromEntries(Object.keys(data).map(k => [k, now])), data }) } } }) }, tk);
+      setMeta({ gistId: g.id, user: user.login, ver: 1, base: hashes(data), dirtyAt: {}, lastSyncAt: now });
     }
     start();
   }
-  async function push() {
-    const m = meta(); if (!token() || !m.gistId || busy) return;
-    const data = collect(), h = hashOf(data);
-    if (h === m.lastHash) return;
-    busy = true;
-    try {
-      const syncAt = Date.now();
-      await gh('/gists/' + m.gistId, { method: 'PATCH', body: JSON.stringify({ files: { [FILE]: { content: JSON.stringify({ app: 'my-chart', syncAt, data }) } } }) });
-      setMeta({ lastHash: h, lastSyncAt: syncAt }); api.lastError = '';
-    } catch (e) { api.lastError = e.message; }
-    finally { busy = false; }
-  }
-  async function pull(force) {
-    const m = meta(); if (!token() || !m.gistId || busy) return;
-    busy = true;
-    try {
-      const remote = await readRemote(m.gistId);
-      api.lastError = '';
-      if (remote && remote.syncAt > (m.lastSyncAt || 0) && hashOf(remote.data || {}) !== hashOf(collect())) { busy = false; apply(remote); return; }
-      if (force) toast('이미 최신이에요');
-    } catch (e) { api.lastError = e.message; if (force) toast('동기화 실패: ' + e.message); }
-    finally { busy = false; }
+  // 예전 방식(통째로 저장)에서 넘어올 때 기준점 만들기
+  async function migrate() {
+    const m = meta(); if (m.base || !m.gistId) return;
+    const remote = await readRemote(m.gistId), local = collect();
+    const localUnchanged = m.lastHash && (() => { const keys = Object.keys(local).sort(); const o = {}; keys.forEach(k => { o[k] = local[k]; }); const str = JSON.stringify(o); let x = 0; for (let i = 0; i < str.length; i++) x = (x * 31 + str.charCodeAt(i)) | 0; return (x + ':' + str.length) === m.lastHash; })();
+    // 이 기기가 마지막 동기화 뒤로 안 바뀌었으면 → 다른 기기 것이 최신으로 간주
+    setMeta({ base: localUnchanged ? hashes(local) : hashes(remote.data), dirtyAt: {} });
   }
   function start() {
-    clearInterval(timer);
-    timer = setInterval(() => { if (!document.hidden) push(); }, 4000);           // 바뀐 게 있으면 4초 안에 올림
-    setInterval(() => { if (!document.hidden) pull(); }, 60000);               // 1분마다 다른 기기 변경 확인
-    document.addEventListener('visibilitychange', () => { if (document.hidden) push(); else pull(); });
-    window.addEventListener('pagehide', () => push());
+    if (started) return; started = true;
+    timer = setInterval(tick, 4000);
+    timer2 = setInterval(() => { if (!document.hidden) sync(); }, 60000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
   }
-  function disconnect() { clearInterval(timer); localStorage.removeItem('sync:token'); localStorage.removeItem('sync:meta'); }
-  async function init() { if (!token() || !meta().gistId) return; await pull(); start(); }
-  return Object.assign(api, { token, meta, connect, push, pull, disconnect, init });
+  function disconnect() { clearInterval(timer); clearInterval(timer2); started = false; localStorage.removeItem('sync:token'); localStorage.removeItem('sync:meta'); }
+  async function init() {
+    if (!token() || !meta().gistId) return;
+    try { await migrate(); } catch (e) { api.lastError = e.message; }
+    await sync();   // 켜자마자 먼저 받아오기
+    start();
+  }
+  return Object.assign(api, { token, meta, connect, sync, pull: f => sync(f), push: () => sync(), disconnect, init });
 })();
 
 // ───────── 폰 전용 화면 (트뷰 모바일처럼) ─────────

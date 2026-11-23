@@ -161,6 +161,11 @@
   html,body{overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
   input,select{-webkit-user-select:auto;user-select:auto}
   @media (pointer:coarse){ #left .more{opacity:1;width:12px} #left button.tb{height:38px} }
+  .fbox{position:absolute;z-index:6;display:none;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:12px;min-width:128px;box-shadow:0 4px 14px rgba(0,0,0,.35);font-variant-numeric:tabular-nums}
+  .fbox.show{display:block}
+  .fbox .fh{color:var(--muted);font-size:11px;margin-bottom:3px}
+  .fbox .fr{display:flex;justify-content:space-between;gap:14px;line-height:1.55}
+  .fbox .fr span{color:var(--muted)}
   /* ═══ 폰 전용 화면 ═══ */
   .monly{display:none!important}
   body.mobile .monly{display:revert!important}
