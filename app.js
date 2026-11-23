@@ -41,7 +41,7 @@ const DEF_SETTINGS = {
   theme: 'dark', chartType: 'candle_solid',
   bodyUp: '#26a69a', bodyDown: '#ef5350', borderShow: true, borderUp: '#26a69a', borderDown: '#ef5350', wickShow: true, wickUp: '#26a69a', wickDown: '#ef5350',
   compareRule: 'current_open', lastLine: true, highLow: true,
-  statusOHLC: 'float', statusInd: 'auto',
+  statusOHLC: 'tv', statusInd: 'auto',
   axisPos: 'right', scale: 'normal', invert: false, countdown: true,
   bg: '', gridV: true, gridH: true, gridColor: '', crossColor: '', textSize: 12, textColor: ''
 };
@@ -50,7 +50,7 @@ function migrateSettings(s) {
   if (s.up && !s.bodyUp) { s.bodyUp = s.borderUp = s.wickUp = s.up; }
   if (s.down && !s.bodyDown) { s.bodyDown = s.borderDown = s.wickDown = s.down; }
   if (s.grid === false && s.gridV == null) { s.gridV = s.gridH = false; }
-  if (!s.statusOHLC || s.statusOHLC === 'auto') s.statusOHLC = 'float';
+  if (!s.statusOHLC || ['auto', 'float', 'follow_cross'].includes(s.statusOHLC)) s.statusOHLC = 'tv';
   delete s.up; delete s.down; delete s.grid;
   return Object.assign(clone(DEF_SETTINGS), s);
 }
@@ -290,13 +290,13 @@ class Cell {
     this.chart = init(this.cv, { locale: 'ko-KR', timezone: 'Asia/Seoul' });
     this.ws = null; this.lastBar = null; this.pp = 2; this.crosshair = null; this.suppress = false; this.activeTool = null;
     this.rp = { buffer: [], fetchedTo: 0, done: false, fetching: false, cb: null };
-    this.fb = document.createElement('div'); this.fb.className = 'fbox'; this.el.appendChild(this.fb);
-    this.ptr = null;
-    const trackPtr = e => { this.ptr = { x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch' }; };
-    this.el.addEventListener('pointermove', trackPtr, true);
-    this.el.addEventListener('pointerdown', e => { trackPtr(e); if (e.pointerType === 'touch') this.hideFloat(); }, true);
-    this.el.addEventListener('mouseleave', () => this.hideFloat());
-    this.chart.subscribeAction('onCrosshairChange', c => { this.crosshair = c; this.syncCrosshair(c); this.updateFloat(c); });
+    this.crossOn = false; this.open24 = null;
+    // 트뷰처럼: 평소엔 현재가·24시간 등락, 십자선을 움직일 땐 그 봉의 시고저종
+    const crossOff = () => { if (!this.crossOn) return; cells.forEach(c => { c.crossOn = false; c.chart.executeAction('onCrosshairChange', null); }); };
+    this.el.addEventListener('mouseleave', crossOff);
+    this.el.addEventListener('touchend', crossOff, { passive: true });
+    this.el.addEventListener('touchcancel', crossOff, { passive: true });
+    this.chart.subscribeAction('onCrosshairChange', c => { this.crosshair = c; if (c && c.x != null) this.crossOn = true; this.syncCrosshair(c); });
     this.chart.setFormatter({ formatExtendText: ({ data }) => {
       if (R.on || !data || !L.settings.countdown) return '';
       const left = closeTimeOf(data.timestamp, this.st.tf) - Date.now();
@@ -386,7 +386,10 @@ class Cell {
     if (tok !== this.st.market + this.st.symbol) return;
     this.pp = info.pp;
     this.removeDrawings();
+    this.open24 = null;
+    this.chart.setStyles({ candle: { tooltip: { title: { template: this.titleTpl() } } } });
     this.chart.setSymbol({ ticker: st.symbol, market: st.market, pricePrecision: info.pp, volumePrecision: info.vp });
+    this.fetch24();
   }
   setSymbol(market, symbol) { this.st.market = market; this.st.symbol = symbol; this.applySymbol(); this.label(); }
   setTf(tf) { this.st.tf = tf; this.chart.setPeriod(TFS[tf][0]); this.label(); }
@@ -534,7 +537,7 @@ class Cell {
             extendTexts: [{ ...lastText, show: !!s.countdown, position: 'below_price', updateInterval: 1000, backgroundColor: null }]
           }
         },
-        tooltip: { showRule: s.statusOHLC === 'float' ? 'always' : rule(s.statusOHLC), legend: { template: s.statusOHLC === 'float' ? [] : [{ title: 'time', value: '{time}' }, { title: 'open', value: '{open}' }, { title: 'high', value: '{high}' }, { title: 'low', value: '{low}' }, { title: 'close', value: '{close}' }] } }
+        tooltip: { showRule: s.statusOHLC === 'none' ? 'none' : 'always', title: { template: this.titleTpl() }, legend: { template: d => this.statusLegend(d) } }
       },
       indicator: { tooltip: { showRule: rule(s.statusInd) }, bars: [{ upColor: hexA(s.bodyUp, 0.6), downColor: hexA(s.bodyDown, 0.6), noChangeColor: hexA(s.bodyUp, 0.6) }] },
       grid: { show: true, horizontal: { show: s.gridH, ...gc }, vertical: { show: s.gridV, ...gc } },
@@ -545,36 +548,39 @@ class Cell {
     this.applyAxis();
     this.el.style.background = s.bg || 'var(--bg)';
   }
+  titleTpl() { return `{ticker}${this.st.market === 'futures' ? ' 무기한' : ''} · {period} · 바이낸스${this.st.market === 'spot' ? ' 현물' : ''}`; }
+  // 상태 표시줄 (차트 왼쪽 위)
+  statusLegend(data) {
+    const k = data && data.current; if (!k) return [];
+    const s = L.settings, f = v => fmtPrice(v, this.pp), up = s.bodyUp, dn = s.bodyDown;
+    const lab = s.theme === 'light' ? '#131722' : '#d1d4dc';
+    const chgText = (d, base) => `${d > 0 ? '+' : ''}${f(d)} (${d > 0 ? '+' : ''}${(d / base * 100).toFixed(2)}%)`;
+    if (s.statusOHLC === 'tv' && !this.crossOn) {
+      const list = this.chart.getDataList(), last = list[list.length - 1] || k;
+      let base = this.open24;
+      if (!base) { const t = last.timestamp - 864e5; base = (list.find(b => b.timestamp >= t) || list[0] || last).open; }
+      const d = last.close - base, col = d >= 0 ? up : dn;
+      return [{ title: '', value: { text: f(last.close), color: col } }, { title: '', value: { text: chgText(d, base), color: col } }];
+    }
+    const ref = data.prev ? data.prev.close : k.open, d = k.close - ref;
+    const col = k.close >= k.open ? up : dn;
+    const L2 = (t, v) => ({ title: { text: t, color: lab }, value: { text: f(v), color: col } });
+    return [L2('시', k.open), L2('고', k.high), L2('저', k.low), L2('종', k.close), { title: '', value: { text: chgText(d, ref), color: d >= 0 ? up : dn } }];
+  }
+  async fetch24() {
+    const st = this.st, key = st.market + st.symbol;
+    if (MOCK) { this.open24 = null; return; }
+    try {
+      const x = await (await fetch(`${MARKETS[st.market].rest}/ticker/24hr?symbol=${st.symbol}`)).json();
+      if (key === this.st.market + this.st.symbol && x && x.openPrice) this.open24 = +x.openPrice;
+    } catch {}
+  }
   applyAxis() {
     const s = L.settings, ch = this.chart;
     const panes = ['candle_pane', ...ch.getIndicators().map(i => i.paneId)].filter((v, i, a) => v && a.indexOf(v) === i);
     panes.forEach(p => ch.overrideYAxis({ paneId: p, position: s.axisPos, ...(p === 'candle_pane' ? { name: s.scale, reverse: !!s.invert } : {}) }));
   }
 
-
-  // 트뷰처럼 십자선 옆에 뜨는 시고저종 박스
-  hideFloat() { this.fb.classList.remove('show'); }
-  updateFloat(c) {
-    if (L.settings.statusOHLC !== 'float' || !c || c.x == null || !this.ptr || picking) return this.hideFloat();
-    const pt = this.chart.convertFromPixel([{ x: c.x }], { paneId: 'candle_pane' })[0];
-    const list = this.chart.getDataList(), i = pt && pt.dataIndex != null ? Math.round(pt.dataIndex) : -1;
-    const k = list[i]; if (!k) return this.hideFloat();
-    const prev = list[i - 1], chg = prev ? (k.close - prev.close) / prev.close * 100 : (k.close - k.open) / k.open * 100;
-    const up = k.close >= k.open, col = up ? 'var(--up)' : 'var(--down)', f = v => fmtPrice(v, this.pp);
-    const row = (t, v, cl) => `<div class="fr"><span>${t}</span><b${cl ? ` style="color:${cl}"` : ''}>${v}</b></div>`;
-    this.fb.innerHTML = `<div class="fh">${fmtTime(k.timestamp)}</div>` +
-      row('시가', f(k.open), col) + row('고가', f(k.high), col) + row('저가', f(k.low), col) + row('종가', f(k.close), col) +
-      row('등락', (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%', chg >= 0 ? 'var(--up)' : 'var(--down)') +
-      row('진폭', ((k.high - k.low) / k.low * 100).toFixed(2) + '%');
-    this.fb.classList.add('show');
-    const r = this.el.getBoundingClientRect(), w = this.fb.offsetWidth, hh = this.fb.offsetHeight;
-    const px = this.ptr.x - r.left, py = this.ptr.y - r.top, gap = this.ptr.touch ? 36 : 16;
-    let left = px + gap; if (left + w > r.width - 72) left = px - gap - w;
-    let top = this.ptr.touch ? py - hh - gap : py + gap;
-    if (top < 4) top = py + gap;
-    if (top + hh > r.height - 28) top = Math.max(4, r.height - 28 - hh);
-    this.fb.style.left = Math.max(4, left) + 'px'; this.fb.style.top = top + 'px';
-  }
 
   // 십자선 동기화 (같은 시간 위치)
   syncCrosshair(c) {
@@ -585,7 +591,7 @@ class Cell {
     for (const o of cells) {
       if (o === this) continue;
       const p = o.chart.convertToPixel({ timestamp: ts }, { paneId: 'candle_pane' });
-      if (p && p.x != null) o.chart.executeAction('onCrosshairChange', { x: p.x, paneId: 'candle_pane' });
+      if (p && p.x != null) { o.crossOn = true; o.chart.executeAction('onCrosshairChange', { x: p.x, paneId: 'candle_pane' }); }
     }
     syncing = false;
   }
@@ -913,7 +919,6 @@ document.addEventListener('keydown', e => {
   if (e.altKey && ALT_KEYS[e.code]) { e.preventDefault(); startTool(ALT_KEYS[e.code]); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); deleteSelected(); return; }
   if (e.key === 'Escape') { cancelDrawing(); endPick(); closeMenus(); hideDrawBar(); document.querySelectorAll('.modal').forEach(m => m.classList.remove('show')); return; }
-  if (R.on && e.shiftKey && e.key === 'ArrowRight') { e.preventDefault(); replayStep(); return; }
   if (/^[a-zA-Z0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && !document.querySelector('.modal.show')) { e.preventDefault(); openSymPanel(e.key.toUpperCase()); }
 });
 
@@ -1041,7 +1046,7 @@ const SET_TABS = [
     { type: 'check', k: 'highLow', label: '화면 안 최고가·최저가 표시' }
   ] },
   { id: 'status', t: '상태 표시줄', items: [
-    { type: 'select', k: 'statusOHLC', label: '시고저종 정보', opts: [['float', '플로팅 박스 (트뷰처럼, 십자선 옆)'], ['always', '차트 위쪽에 항상'], ['follow_cross', '차트 위쪽, 마우스 올릴 때만'], ['none', '숨김']] },
+    { type: 'select', k: 'statusOHLC', label: '시고저종 정보', opts: [['tv', '트뷰처럼 (평소 현재가, 십자선 땐 시고저종)'], ['always', '시고저종 항상'], ['none', '숨김']] },
     { type: 'select', k: 'statusInd', label: '지표 값', opts: STATUS_OPTS }
   ] },
   { id: 'scale', t: '스케일', items: [
@@ -1553,6 +1558,15 @@ const Sync = (() => {
   }
   return Object.assign(api, { token, meta, connect, sync, pull: f => sync(f), push: () => sync(), disconnect, init });
 })();
+
+// 리플레이 중 Shift+→ : 차트 기본 단축키(화면 스크롤)보다 먼저 가로채서 한 봉만 진행
+window.addEventListener('keydown', e => {
+  if (!R.on || !e.shiftKey || e.key !== 'ArrowRight') return;
+  const tag = (e.target.tagName || '').toLowerCase(); if (tag === 'input' || tag === 'select') return;
+  e.preventDefault(); e.stopImmediatePropagation(); replayStep();
+}, true);
+// 24시간 등락 기준값 1분마다 새로 고침
+setInterval(() => { if (!document.hidden) cells.forEach(c => c.fetch24()); }, 60000);
 
 // ───────── 폰 전용 화면 (트뷰 모바일처럼) ─────────
 const MQ = matchMedia('(max-width: 760px), (max-height: 500px) and (pointer: coarse)');
