@@ -25,7 +25,7 @@
   button:hover{background:var(--panel2)}
   button.on{color:var(--accent);background:var(--panel2)}
   select,input[type=number],input[type=text]{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:3px 6px}
-  #app{display:grid;grid-template-rows:42px 1fr;grid-template-columns:44px 1fr auto;height:100%}
+  #app{display:grid;grid-template-rows:42px 1fr;grid-template-columns:44px 1fr auto;position:fixed;inset:0}
   #top{grid-column:1/4;display:flex;align-items:center;gap:4px;padding:0 8px;border-bottom:1px solid var(--line);background:var(--panel);overflow-x:auto;white-space:nowrap}
   #top > *{flex:none}
   #top .sep{width:1px;height:22px;background:var(--line);margin:0 4px;flex:none}
@@ -74,8 +74,8 @@
   .wl-row,.wl-head{display:grid;grid-template-columns:1fr 78px 62px 58px 14px;gap:4px;align-items:center;padding:7px 8px 7px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
   .wl-head{cursor:default;font-size:11px;color:var(--muted);padding-top:5px;padding-bottom:5px} .wl-head span{text-align:right} .wl-head span:first-child{text-align:left}
   .wl-row .a{text-align:right;font-size:12px}
-  .wl-row .p{color:var(--text)}
-  .wl-row .p.fl-up{animation:flu .8s ease-out} .wl-row .p.fl-dn{animation:fld .8s ease-out}
+  .wl-row .p,.wl-row .a,.wl-row .c{color:var(--text)}
+  .wl-row .fl-up{animation:flu .8s ease-out} .wl-row .fl-dn{animation:fld .8s ease-out}
   @keyframes flu{0%,45%{color:var(--up)}100%{color:var(--text)}}
   @keyframes fld{0%,45%{color:var(--down)}100%{color:var(--text)}}
   .wl-row:hover{background:var(--panel2)} .wl-row.cur{background:var(--panel2)}
@@ -160,35 +160,76 @@
   #app{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);-webkit-user-select:none;user-select:none}
   html,body{overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
   input,select{-webkit-user-select:auto;user-select:auto}
-  @media (max-width:700px){
-    #right{position:absolute;right:0;top:42px;bottom:0;z-index:30;width:min(300px,86vw)}
-    #price{min-width:0} #indBox{grid-template-columns:120px 1fr} #setBox{grid-template-columns:100px 1fr}
-    #app{grid-template-columns:40px 1fr auto}
-    #left button.tb{width:32px}
-    #top button{padding:5px 6px}
-    .sym-row,.sym-head{grid-template-columns:22px 1fr 80px 58px}
-    .sym-row>:last-child,.sym-head>:last-child{display:none}
-  }
   @media (pointer:coarse){ #left .more{opacity:1;width:12px} #left button.tb{height:38px} }
+  /* ═══ 폰 전용 화면 ═══ */
+  .monly{display:none!important}
+  body.mobile .monly{display:revert!important}
+  body.mobile #mnav{display:flex!important}
+  body.mobile .donly{display:none!important}
+  body.mobile #app{grid-template-rows:46px 1fr 56px;grid-template-columns:1fr}
+  body.mobile #top{grid-column:1;gap:2px;padding:0 6px}
+  body.mobile #left{display:none}
+  body.mobile #center{grid-column:1;grid-row:2}
+  body.mobile #right{position:fixed;inset:0;top:calc(46px + env(safe-area-inset-top));bottom:calc(56px + env(safe-area-inset-bottom));width:auto;z-index:40;border:0}
+  body.mobile #right .wl-row,body.mobile #right .wl-head{grid-template-columns:1fr 100px 80px 70px 18px;padding:12px 14px;font-size:15px}
+  body.mobile #right .wl-head{font-size:12px;padding:6px 14px}
+  body.mobile #grid{grid-template:1fr/1fr!important}
+  body.mobile #grid .cell:not(.act){display:none}
+  body.mobile #grid .cell.act{outline:0}
+  body.mobile #symBtn{font-size:15px;padding:5px 10px}
+  body.mobile #price{font-size:15px;margin-left:4px;min-width:0}
+  body.mobile #drawBar{top:auto;bottom:8px}
+  body.mobile #replayBar{bottom:8px}
+  body.mobile #toast{bottom:calc(70px + env(safe-area-inset-bottom))}
+  body.mobile .menu{max-width:96vw}
+  body.mobile #symPanel{position:fixed;inset:0!important;top:calc(46px + env(safe-area-inset-top))!important;width:auto;max-height:none;border-radius:0;z-index:45}
+  body.mobile #symList{max-height:calc(100vh - 160px)}
+  body.mobile .sym-row,body.mobile .sym-head{grid-template-columns:26px 1fr 90px 64px;padding:10px 12px;font-size:14px}
+  body.mobile .sym-row>:last-child,body.mobile .sym-head>:last-child{display:none}
+  body.mobile #indBox,body.mobile #setBox{width:100vw;height:100%;border-radius:0;grid-template-columns:110px 1fr}
+  body.mobile #indEdit .ln{grid-template-columns:1fr 40px 80px}
+  body.mobile #indList .it .m{display:none}
+  body.mobile #indList .it{padding:9px 6px}
+  #mnav{grid-column:1;grid-row:3;display:flex;border-top:1px solid var(--line);background:var(--panel);padding-bottom:env(safe-area-inset-bottom)}
+  #mnav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--muted);border-radius:0}
+  #mnav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  #mnav button.on{color:var(--accent)}
+  #mTf{font-weight:700;min-width:44px;border:1px solid var(--line)}
+  #mCell{border:1px solid var(--line);font-size:12px}
+  .sheet{position:fixed;left:0;right:0;bottom:0;z-index:55;background:var(--panel);border-top:1px solid var(--line);border-radius:14px 14px 0 0;max-height:78vh;overflow-y:auto;padding:8px 12px calc(12px + env(safe-area-inset-bottom));transform:translateY(105%);transition:transform .2s ease;box-shadow:0 -8px 30px rgba(0,0,0,.4)}
+  .sheet.show{transform:none}
+  .sheet .grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:2px auto 8px}
+  .sheet h5{margin:12px 2px 6px;font-size:12px;color:var(--muted);font-weight:600}
+  .sheet .tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px}
+  .sheet .tgrid button{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;font-size:11px;border:1px solid var(--line);border-radius:8px;line-height:1.2;text-align:center}
+  .sheet .tgrid button.on{border-color:var(--accent);color:var(--accent)}
+  .sheet .tgrid svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .sheet .mrow{display:flex;align-items:center;gap:12px;padding:14px 6px;border-bottom:1px solid var(--line);font-size:15px;cursor:pointer}
+  .sheet .mrow:last-child{border-bottom:0}
+  #sheetDim{position:fixed;inset:0;z-index:54;background:rgba(0,0,0,.4);display:none}
+  #sheetDim.show{display:block}
 </style>
 </head>
 <body>
 <div id="app">
   <div id="top">
-    <button id="btnLayout" title="레이아웃">▦ 레이아웃</button>
-    <div class="sep"></div>
+    <button id="btnLayout" class="donly" title="레이아웃">▦ 레이아웃</button>
+    <div class="sep donly"></div>
     <button id="symBtn" title="종목 검색 (차트에서 아무 글자나 입력해도 열림)">BTCUSDT</button>
     <span id="price">-</span>
     <span id="rpBadge">REPLAY</span>
-    <div class="sep"></div>
-    <div id="tfs"></div>
-    <div class="sep"></div>
+    <span style="flex:1" class="monly"></span>
+    <button id="mCell" class="monly" title="분할 화면 칸 바꾸기"></button>
+    <button id="mTf" class="monly"></button>
+    <div class="sep donly"></div>
+    <div id="tfs" class="donly"></div>
+    <div class="sep donly"></div>
     <button id="btnType" title="차트 종류"></button>
-    <button id="btnInd">ƒ 지표</button>
-    <button id="btnReplay">⏪ 리플레이</button>
-    <button id="btnSettings">⚙ 설정</button>
-    <button id="btnGrid" title="화면 분할">⊞ 분할</button>
-    <button id="btnWl">☰ 관심</button>
+    <button id="btnInd" class="donly">ƒ 지표</button>
+    <button id="btnReplay" class="donly">⏪ 리플레이</button>
+    <button id="btnSettings" class="donly">⚙ 설정</button>
+    <button id="btnGrid" class="donly" title="화면 분할">⊞ 분할</button>
+    <button id="btnWl" class="donly">☰ 관심</button>
   </div>
   <div id="left"></div>
   <div id="center">
@@ -223,6 +264,7 @@
     <h3>관심종목 <button id="wlAdd" title="현재 종목 추가">＋ 추가</button></h3>
     <div id="wl"></div>
   </div>
+  <nav id="mnav" class="monly"></nav>
 </div>
 <div class="menu" id="layMenu"></div>
 <div class="menu" id="toolFly"></div>
@@ -251,6 +293,10 @@
     <div class="ft"><button id="setReset">기본값으로</button><span class="m">바꾸는 즉시 적용·저장돼요</span></div>
   </div>
 </div>
+<div id="sheetDim"></div>
+<div class="sheet" id="toolSheet"></div>
+<div class="sheet" id="moreSheet"></div>
+<div class="menu" id="tfMenu"></div>
 <div id="toast"></div>
 
 <script src="klinecharts.min.js"></script>

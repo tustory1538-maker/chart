@@ -1,5 +1,5 @@
 // 앱 화면 파일을 저장해 두고, 새 버전이 있으면 자동으로 받아옴 (시세 데이터는 저장 안 함)
-const CACHE = 'my-chart-v5';
+const CACHE = 'my-chart-v6';
 const SHELL = ['./', 'index.html', 'app.js', 'tools.js', 'klinecharts.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {

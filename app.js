@@ -565,6 +565,7 @@ function setActive(i) {
   if (L.active === i || !cells[i]) return;
   L.active = i; saveLayout();
   cells.forEach((c, j) => c.el.classList.toggle('act', j === i));
+  if (isMobile()) setTimeout(() => { cells[i].chart.resize(); cells[i].fitPanes(); }, 30);
   updateTopBar();
   if ($('#indModal').classList.contains('show')) { renderIndList(); renderIndEdit(); }
 }
@@ -580,6 +581,7 @@ function updateTopBar() {
   document.querySelectorAll('#tfs button').forEach(b => b.classList.toggle('on', b.dataset.tf === st.tf));
   updatePrice();
   renderWatchlist();
+  updateMobileBar();
 }
 
 function buildGrid() {
@@ -761,6 +763,7 @@ function setActiveTool(name) {
   activeTool = name;
   left.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
   const cur = left.querySelector('#btnCursor'); if (cur) cur.classList.toggle('on', !name);
+  if (typeof drawHint === 'function') drawHint(name);
 }
 function cancelDrawing() { cells.forEach(c => c.cancelDrawing()); setActiveTool(null); }
 function startTool(name) {
@@ -1297,7 +1300,7 @@ function renderWatchlist() {
     const cur = w.market === st.market && w.symbol === st.symbol;
     return `<div class="wl-row ${cur ? 'cur' : ''}" data-i="${i}" data-k="${k}">
       <span class="sn"><span class="s">${w.symbol.replace(/USDT$/, '')}</span>${w.symbol.endsWith('USDT') ? '' : `<span class="m">${esc(w.symbol.replace(/^.*?(USDC|FDUSD|BTC|ETH|BNB)$/, '$1'))}</span>`}${w.market === 'spot' ? '<span class="m">현물</span>' : ''}</span>
-      <span class="p">${c.p}</span><span class="a ${c.cls}">${c.a}</span><span class="c ${c.cls}">${c.r}</span>
+      <span class="p">${c.p}</span><span class="a">${c.a}</span><span class="c">${c.r}</span>
       <button class="x" data-del="${i}" title="삭제">×</button></div>`;
   }).join('') || `<div style="padding:14px;color:var(--muted)">종목 검색창에서 ☆를 눌러 추가해요</div>`;
 }
@@ -1305,12 +1308,10 @@ function renderWatchlist() {
 function updateWl(k, prev) {
   const row = $('#wl').querySelector(`[data-k="${k}"]`); if (!row) return;
   const p = wlPrices[k], c = wlCells(p);
-  [['.a', c.a], ['.c', c.r]].forEach(([sel, txt]) => { const e = row.querySelector(sel); e.textContent = txt; e.className = sel.slice(1) + ' ' + c.cls; });
-  row.querySelector('.p').textContent = c.p;
+  const els = [['.p', c.p], ['.a', c.a], ['.c', c.r]].map(([sel, txt]) => { const e = row.querySelector(sel); e.textContent = txt; return e; });
   if (prev != null && +p.c !== +prev) {
-    const e = row.querySelector('.p');
-    e.classList.remove('fl-up', 'fl-dn'); void e.offsetWidth;
-    e.classList.add(+p.c > +prev ? 'fl-up' : 'fl-dn');
+    const cls = +p.c > +prev ? 'fl-up' : 'fl-dn';
+    els.forEach(e => { e.classList.remove('fl-up', 'fl-dn'); void e.offsetWidth; e.classList.add(cls); });
   }
 }
 function setWlPrice(k, c, open, chg, amt) {
@@ -1368,7 +1369,7 @@ $('#wlAdd').onclick = () => {
   toggleWatch(st.market, st.symbol);
 };
 $('#btnWl').onclick = () => { L.wlOpen = !L.wlOpen; saveLayout(); applyWl(); };
-function applyWl() { $('#right').classList.toggle('hide', !L.wlOpen); $('#btnWl').classList.toggle('on', L.wlOpen); setTimeout(() => cells.forEach(c => c.chart.resize()), 0); }
+function applyWl() { $('#right').classList.toggle('hide', isMobile() ? mView !== 'watch' : !L.wlOpen); $('#btnWl').classList.toggle('on', L.wlOpen); setTimeout(() => cells.forEach(c => c.chart.resize()), 0); }
 
 // ───────── 기기 동기화 (깃허브 Gist에 저장) ─────────
 const Sync = (() => {
@@ -1469,6 +1470,109 @@ const Sync = (() => {
   return Object.assign(api, { token, meta, connect, push, pull, disconnect, init });
 })();
 
+// ───────── 폰 전용 화면 (트뷰 모바일처럼) ─────────
+const MQ = matchMedia('(max-width: 760px), (max-height: 500px) and (pointer: coarse)');
+let mView = 'chart';
+function isMobile() { return MQ.matches; }
+const NAV_IC = {
+  watch: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+  chart: '<svg viewBox="0 0 24 24"><path d="M7 3v4M7 15v5M17 6v3M17 17v3"/><rect x="5" y="7" width="4" height="8"/><rect x="15" y="9" width="4" height="8"/></svg>',
+  draw: '<svg viewBox="0 0 24 24"><path d="M4 20l4-1L19 8l-3-3L5 16z"/><path d="M14 7l3 3"/></svg>',
+  ind: '<svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 8-9"/><path d="M3 21h18"/></svg>',
+  more: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>'
+};
+function renderNav() {
+  $('#mnav').innerHTML = [['watch', '관심종목'], ['chart', '차트'], ['draw', '작도'], ['ind', '지표'], ['more', '메뉴']]
+    .map(([k, t]) => `<button data-nav="${k}" class="${(k === mView) ? 'on' : ''}">${NAV_IC[k]}<span>${t}</span></button>`).join('');
+}
+function setView(v) { mView = v; renderNav(); applyWl(); }
+function closeSheets() { document.querySelectorAll('.sheet').forEach(s => s.classList.remove('show')); $('#sheetDim').classList.remove('show'); }
+function openSheet(id, render) { closeMenus(); render(); $('#sheetDim').classList.add('show'); $(id).classList.add('show'); }
+$('#sheetDim').onclick = closeSheets;
+$('#mnav').addEventListener('click', e => {
+  const b = e.target.closest('[data-nav]'); if (!b) return;
+  const k = b.dataset.nav;
+  closeSheets(); closeMenus(); $('#symPanel').classList.remove('show');
+  if (k === 'watch') setView(mView === 'watch' ? 'chart' : 'watch');
+  else if (k === 'chart') setView('chart');
+  else if (k === 'draw') { setView('chart'); openSheet('#toolSheet', renderToolSheet); }
+  else if (k === 'ind') { setView('chart'); openIndModal(); }
+  else if (k === 'more') openSheet('#moreSheet', renderMoreSheet);
+});
+function renderToolSheet() {
+  $('#toolSheet').innerHTML = '<div class="grab"></div>' + TK.GROUPS.map(g => `<h5>${g.title}</h5><div class="tgrid">${g.tools.map(t =>
+    `<button data-st="${t}" class="${t === activeTool ? 'on' : ''}">${TK.ICONS[t]}<span>${TK.NAMES[t]}</span></button>`).join('')}</div>`).join('') +
+    `<h5>작도 관리</h5><div class="tgrid">
+      <button data-sa="magnet" class="${L.magnet !== 'off' ? 'on' : ''}"><span style="font-size:20px">🧲</span><span>자석: ${{ off: '끔', weak: '약', strong: '강' }[L.magnet]}</span></button>
+      <button data-sa="lock" class="${L.lockAll ? 'on' : ''}"><span style="font-size:20px">🔒</span><span>${L.lockAll ? '잠금 풀기' : '모두 잠금'}</span></button>
+      <button data-sa="hide" class="${drawHidden ? 'on' : ''}"><span style="font-size:20px">👁</span><span>${drawHidden ? '보이기' : '숨기기'}</span></button>
+      <button data-sa="clear"><span style="font-size:20px">🗑</span><span>이 종목 전체 삭제</span></button></div>`;
+}
+$('#toolSheet').addEventListener('click', e => {
+  const t = e.target.closest('[data-st]');
+  if (t) { closeSheets(); startTool(t.dataset.st); return; }
+  const a = e.target.closest('[data-sa]'); if (!a) return;
+  const id = { magnet: 'btnMagnet', lock: 'btnLock', hide: 'btnHideDraw', clear: 'btnClearDraw' }[a.dataset.sa];
+  $('#' + id).click();
+  renderToolSheet();
+});
+function renderMoreSheet() {
+  const n = GRIDS[L.grid];
+  $('#moreSheet').innerHTML = `<div class="grab"></div>
+    <div class="mrow" data-m="replay">⏪ ${R.on ? '리플레이 종료' : '리플레이'}</div>
+    <div class="mrow" data-m="settings">⚙ 차트 설정</div>
+    <div class="mrow" data-m="layout">▦ 레이아웃 · <b>${esc(layoutName())}</b></div>
+    <div class="mrow" data-m="grid">⊞ 화면 분할 · ${n}칸 ${n > 1 ? '(폰에선 한 칸씩 보여요)' : ''}</div>
+    <div class="mrow" data-m="star">${watchlist.some(w => w.market === activeCell().st.market && w.symbol === activeCell().st.symbol) ? '★ 관심종목에서 빼기' : '☆ 관심종목에 추가'}</div>`;
+}
+$('#moreSheet').addEventListener('click', e => {
+  const r = e.target.closest('[data-m]'); if (!r) return;
+  const m = r.dataset.m; closeSheets(); setView('chart');
+  if (m === 'replay') R.on ? exitReplay() : beginPick();
+  else if (m === 'settings') openSetModal();
+  else if (m === 'layout') setTimeout(() => toggleMenu($('#layMenu'), $('#symBtn'), renderLayMenu), 0);
+  else if (m === 'grid') setTimeout(() => toggleMenu($('#gridMenu'), $('#symBtn'), renderGridMenu), 0);
+  else if (m === 'star') { const st = activeCell().st; toggleWatch(st.market, st.symbol); toast('관심종목 변경됨'); }
+});
+// 타임프레임 버튼 / 분할 칸 바꾸기
+function updateMobileBar() {
+  if (!L || !cells.length) return;
+  $('#mTf').textContent = activeCell().st.tf;
+  const n = cells.length;
+  $('#mCell').style.visibility = n > 1 ? 'visible' : 'hidden';
+  $('#mCell').textContent = `칸 ${L.active + 1}/${n}`;
+}
+$('#mTf').onclick = e => {
+  e.stopPropagation();
+  toggleMenu($('#tfMenu'), e.currentTarget, () => {
+    const cur = activeCell().st.tf;
+    $('#tfMenu').innerHTML = `<div class="t">타임프레임</div><div class="gridpick">${TF_SHOW.map(t => `<button data-tf="${t}" class="${t === cur ? 'on' : ''}">${t}</button>`).join('')}</div>`;
+  });
+  const m = $('#tfMenu'); m.style.left = Math.max(4, Math.min(m.getBoundingClientRect().left, innerWidth - m.offsetWidth - 6)) + 'px';
+};
+$('#tfMenu').addEventListener('click', e => { const b = e.target.closest('[data-tf]'); if (b) { changeTf(b.dataset.tf); closeMenus(); } });
+$('#mCell').onclick = () => { setActive((L.active + 1) % cells.length); updateMobileBar(); };
+// 관심종목 화면에서 종목을 고르면 차트로 돌아가기
+$('#wl').addEventListener('click', e => { if (isMobile() && e.target.closest('[data-i]') && !e.target.closest('[data-del]')) setView('chart'); });
+// 폰에서 그리는 중에는 위에 안내 + 취소 버튼
+let drawHintOn = false;
+function drawHint(name) {
+  if (!isMobile() || picking) { if (drawHintOn) { $('#hint').classList.remove('show'); drawHintOn = false; } return; }
+  if (name) {
+    $('#hintText').textContent = `${TK.NAMES[name]} — ${TK.HINTS[name] || '차트를 눌러서 그리기'}`;
+    $('#hintExtra').innerHTML = '';
+    $('#hint').classList.add('show'); drawHintOn = true;
+  } else if (drawHintOn) { $('#hint').classList.remove('show'); drawHintOn = false; }
+}
+$('#hintCancel').addEventListener('click', () => { if (drawHintOn) cancelDrawing(); });
+function applyMobile() {
+  document.body.classList.toggle('mobile', isMobile());
+  if (!isMobile()) mView = 'chart';
+  renderNav(); applyWl(); updateMobileBar();
+  setTimeout(() => cells.forEach(c => { c.chart.resize(); c.fitPanes(); }), 60);
+}
+MQ.addEventListener('change', applyMobile);
+
 // ───────── 시작 ─────────
 let rsTimer;
 window.addEventListener('resize', () => { clearTimeout(rsTimer); rsTimer = setTimeout(() => cells.forEach(c => c.chart.resize()), 50); });
@@ -1476,7 +1580,9 @@ let fitTimer;
 new ResizeObserver(() => { cells.forEach(c => c.chart.resize()); clearTimeout(fitTimer); fitTimer = setTimeout(() => cells.forEach(c => c.fitPanes()), 150); }).observe($('#grid'));
 connectWatchlist();
 renderLeft();
+document.body.classList.toggle('mobile', isMobile()); renderNav();
 loadLayout(curLayout);
+applyMobile();
 if (innerWidth < 700 && !LS.get('seen', false)) { L.wlOpen = false; applyWl(); }
 LS.set('seen', true);
 Sync.init();
