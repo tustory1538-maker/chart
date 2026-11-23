@@ -1118,7 +1118,14 @@ function installGuide() {
   return '크롬/엣지 주소창 오른쪽의 <b>설치 아이콘(⊕)</b>을 누르거나, 아래 버튼을 누르세요.';
 }
 function dataTabHTML() {
-  return `<div class="sec">앱으로 설치</div>
+  const m = Sync.meta(), on = !!Sync.token();
+  return `<div class="sec">기기 동기화 (깃허브)</div>
+    <p class="note">${on ? `연결됨 · 마지막 동기화 <b>${m.lastSyncAt ? new Date(m.lastSyncAt).toLocaleString('ko-KR', { hour12: false }) : '-'}</b><br>설정·지표·작도·레이아웃·관심종목이 바뀌면 몇 초 안에 자동으로 올라가고, 다른 기기에서 앱을 열면 자동으로 받아와요.` :
+      `깃허브 토큰(gist 권한)을 넣으면 태블릿·폰·PC가 같은 설정과 작도를 써요. 기기마다 한 번씩만 넣으면 돼요.`}</p>
+    ${on ? `<div class="srow btns"><button id="syncNow">🔄 지금 동기화</button><button id="syncOff">연결 해제</button></div>` :
+      `<div class="srow"><input type="password" id="syncToken" placeholder="ghp_로 시작하는 토큰 붙여넣기" style="flex:1" autocomplete="off"><button id="syncOn">연결</button></div>`}
+    <p class="note" id="syncMsg">${Sync.lastError ? '⚠ ' + esc(Sync.lastError) : ''}</p>
+    <div class="sec">앱으로 설치</div>
     <p class="note">${installGuide()}</p>
     <div class="srow btns"><button id="btnInstall" ${installEvt ? '' : 'disabled'}>📲 앱 설치</button></div>
     <div class="sec">백업 (기기끼리 옮기기)</div>
@@ -1127,6 +1134,14 @@ function dataTabHTML() {
 }
 const BACKUP_KEY = /^(layouts|curLayout|layout:|draw:|watchlist|toolStyle:|groupCur)/;
 function bindDataTab() {
+  if ($('#syncOn')) $('#syncOn').onclick = async () => {
+    const t = $('#syncToken').value.trim(); if (!t) return;
+    $('#syncMsg').textContent = '연결 중…';
+    try { await Sync.connect(t); renderSetModal(); toast('동기화 연결됨'); }
+    catch (e) { $('#syncMsg').textContent = '⚠ ' + e.message; }
+  };
+  if ($('#syncNow')) $('#syncNow').onclick = async () => { $('#syncMsg').textContent = '동기화 중…'; await Sync.pull(true); await Sync.push(); renderSetModal(); };
+  if ($('#syncOff')) $('#syncOff').onclick = () => { if (confirm('이 기기의 동기화를 끌까요? (저장된 데이터는 그대로)')) { Sync.disconnect(); renderSetModal(); } };
   $('#btnInstall').onclick = async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; renderSetModal(); };
   $('#btnExport').onclick = () => {
     saveLayout();
@@ -1269,17 +1284,39 @@ document.addEventListener('click', e => { if (!e.target.closest('.menu')) closeM
 // ───────── 관심종목 ─────────
 const wlPrices = {};
 let wlSockets = [];
+function wlCells(p) {
+  if (!p) return { p: '-', a: '', r: '', cls: '' };
+  const cls = p.chg > 0 ? 'upc' : p.chg < 0 ? 'downc' : '';
+  const sg = p.chg > 0 ? '+' : '';
+  return { p: p.c, a: sg + trimNum(p.amt), r: sg + p.chg.toFixed(2) + '%', cls };
+}
 function renderWatchlist() {
   const st = L && activeCell() ? activeCell().st : {};
-  $('#wl').innerHTML = watchlist.map((w, i) => {
-    const p = wlPrices[w.market + ':' + w.symbol];
+  $('#wl').innerHTML = (watchlist.length ? `<div class="wl-head"><span>종목</span><span>현재가</span><span>등락</span><span>등락률</span><span></span></div>` : '') + watchlist.map((w, i) => {
+    const k = w.market + ':' + w.symbol, c = wlCells(wlPrices[k]);
     const cur = w.market === st.market && w.symbol === st.symbol;
-    return `<div class="wl-row ${cur ? 'cur' : ''}" data-i="${i}">
-      <span><span class="s">${w.symbol}</span><span class="m">${MARKETS[w.market].badge}</span></span>
-      <span class="p">${p ? p.c : '-'}</span>
-      <span class="c ${p ? (p.chg >= 0 ? 'upc' : 'downc') : ''}">${p ? (p.chg >= 0 ? '+' : '') + p.chg.toFixed(2) + '%' : ''}</span>
+    return `<div class="wl-row ${cur ? 'cur' : ''}" data-i="${i}" data-k="${k}">
+      <span class="sn"><span class="s">${w.symbol.replace(/USDT$/, '')}</span>${w.symbol.endsWith('USDT') ? '' : `<span class="m">${esc(w.symbol.replace(/^.*?(USDC|FDUSD|BTC|ETH|BNB)$/, '$1'))}</span>`}${w.market === 'spot' ? '<span class="m">현물</span>' : ''}</span>
+      <span class="p ${c.cls}">${c.p}</span><span class="a ${c.cls}">${c.a}</span><span class="c ${c.cls}">${c.r}</span>
       <button class="x" data-del="${i}" title="삭제">×</button></div>`;
   }).join('') || `<div style="padding:14px;color:var(--muted)">종목 검색창에서 ☆를 눌러 추가해요</div>`;
+}
+// 가격이 바뀐 줄만 고치고, 오르면 초록·내리면 빨강으로 깜빡임
+function updateWl(k, prev) {
+  const row = $('#wl').querySelector(`[data-k="${k}"]`); if (!row) return;
+  const p = wlPrices[k], c = wlCells(p);
+  [['.p', c.p], ['.a', c.a], ['.c', c.r]].forEach(([sel, txt]) => { const e = row.querySelector(sel); e.textContent = txt; e.className = sel.slice(1) + ' ' + c.cls; });
+  if (prev != null && +p.c !== +prev) {
+    const e = row.querySelector('.p');
+    e.classList.remove('fl-up', 'fl-dn'); void e.offsetWidth;
+    e.classList.add(+p.c > +prev ? 'fl-up' : 'fl-dn');
+  }
+}
+function setWlPrice(k, c, open, chg, amt) {
+  const prev = wlPrices[k] ? wlPrices[k].c : null;
+  wlPrices[k] = { c: trimNum(c), chg, amt: amt != null ? amt : c - open, t: Date.now() };
+  if (!$('#wl').querySelector(`[data-k="${k}"]`)) return;
+  updateWl(k, prev);
 }
 function connectWatchlist() {
   wlSockets.forEach(s => s.close()); wlSockets = [];
@@ -1289,11 +1326,27 @@ function connectWatchlist() {
     if (!syms.length) continue;
     wlSockets.push(openWS(`${MARKETS[market].ws}/stream?streams=${syms.join('/')}`, m => {
       const d = m.data; if (!d) return;
-      wlPrices[market + ':' + d.s] = { c: trimNum(d.c), chg: (d.c - d.o) / d.o * 100 };
-      scheduleWlRender();
+      const pp = decimalsOf(d.c);
+      setWlPrice(market + ':' + d.s, d.c, +d.o, (d.c - d.o) / d.o * 100, +(d.c - d.o).toFixed(pp));
     }));
   }
 }
+// 실시간 연결이 안 들어오는 종목은 5초마다 직접 조회해서 채움
+if (MOCK) setInterval(() => watchlist.forEach((w, i) => { const base = 60000 / (i + 1), c = (base * (1 + Math.sin(Date.now() / 7000 + i) * 0.01)).toFixed(2); setWlPrice(w.market + ':' + w.symbol, c, base, (c - base) / base * 100, +(c - base).toFixed(2)); }), 1000);
+async function pollWatchlist() {
+  if (MOCK || document.hidden || !L || !L.wlOpen) return;
+  const now = Date.now();
+  for (const w of watchlist) {
+    const k = w.market + ':' + w.symbol, p = wlPrices[k];
+    if (p && now - p.t < 8000) continue;
+    try {
+      const x = await (await fetch(`${MARKETS[w.market].rest}/ticker/24hr?symbol=${w.symbol}`)).json();
+      if (x && x.lastPrice) { setWlPrice(k, x.lastPrice, +x.openPrice, +x.priceChangePercent, x.priceChange); wlPrices[k].t = now - 3000; }
+    } catch {}
+  }
+}
+setInterval(pollWatchlist, 5000);
+setTimeout(pollWatchlist, 2500);
 function toggleWatch(market, symbol) {
   const i = watchlist.findIndex(w => w.market === market && w.symbol === symbol);
   if (i >= 0) watchlist.splice(i, 1); else watchlist.push({ market, symbol });
@@ -1316,6 +1369,105 @@ $('#wlAdd').onclick = () => {
 $('#btnWl').onclick = () => { L.wlOpen = !L.wlOpen; saveLayout(); applyWl(); };
 function applyWl() { $('#right').classList.toggle('hide', !L.wlOpen); $('#btnWl').classList.toggle('on', L.wlOpen); setTimeout(() => cells.forEach(c => c.chart.resize()), 0); }
 
+// ───────── 기기 동기화 (깃허브 Gist에 저장) ─────────
+const Sync = (() => {
+  const SYNC_KEY = /^(layouts|layout:|draw:|watchlist|toolStyle:|groupCur)/; // curLayout은 기기마다 따로
+  const FILE = 'my-chart-sync.json', DESC = 'my-chart sync (내 차트 동기화 데이터)';
+  const API = 'https://api.github.com';
+  let busy = false, timer = null;
+  const api = { lastError: '' };
+  const token = () => localStorage.getItem('sync:token') || '';
+  const meta = () => LS.get('sync:meta', {});
+  const setMeta = m => LS.set('sync:meta', { ...meta(), ...m });
+  function collect() {
+    const data = {};
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (SYNC_KEY.test(k)) keys.push(k); }
+    keys.sort().forEach(k => { data[k] = localStorage.getItem(k); });
+    return data;
+  }
+  function hashOf(data) { const s = JSON.stringify(data); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h + ':' + s.length; }
+  async function gh(path, opt = {}, tk = token()) {
+    const r = await fetch(API + path, { ...opt, headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + tk, ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
+    if (r.status === 401) throw new Error('토큰이 틀렸거나 만료됐어요');
+    if (r.status === 403 || r.status === 404) throw new Error('토큰에 gist 권한이 없어요 (HTTP ' + r.status + ')');
+    if (!r.ok) throw new Error('깃허브 응답 오류 (HTTP ' + r.status + ')');
+    return r.status === 204 ? null : r.json();
+  }
+  async function readRemote(id) {
+    const g = await gh('/gists/' + id);
+    const f = g.files && g.files[FILE]; if (!f) return null;
+    let text = f.content;
+    if (f.truncated && f.raw_url) text = await (await fetch(f.raw_url)).text();
+    return JSON.parse(text);
+  }
+  function apply(remote) {
+    const del = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (SYNC_KEY.test(k)) del.push(k); }
+    del.forEach(k => localStorage.removeItem(k));
+    Object.entries(remote.data || {}).forEach(([k, v]) => { if (SYNC_KEY.test(k)) localStorage.setItem(k, v); });
+    setMeta({ lastHash: hashOf(collect()), lastSyncAt: remote.syncAt });
+    location.reload();
+  }
+  async function connect(tk) {
+    const user = await gh('/user', {}, tk);
+    // 이미 동기화용 Gist가 있는지 찾기
+    let found = null;
+    for (let page = 1; page <= 5 && !found; page++) {
+      const list = await gh('/gists?per_page=100&page=' + page, {}, tk);
+      found = list.find(g => g.files && g.files[FILE]);
+      if (list.length < 100) break;
+    }
+    localStorage.setItem('sync:token', tk);
+    api.lastError = '';
+    if (found) {
+      setMeta({ gistId: found.id, user: user.login });
+      const remote = await readRemote(found.id);
+      if (remote && confirm('다른 기기에서 저장한 동기화 데이터가 있어요.\n\n[확인] 그 데이터를 이 기기로 가져오기\n[취소] 이 기기 데이터로 덮어쓰기')) { apply(remote); return; }
+      setMeta({ lastHash: '' });
+      await push();
+    } else {
+      const data = collect(), syncAt = Date.now();
+      const g = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: DESC, public: false, files: { [FILE]: { content: JSON.stringify({ app: 'my-chart', syncAt, data }) } } }) }, tk);
+      setMeta({ gistId: g.id, user: user.login, lastHash: hashOf(data), lastSyncAt: syncAt });
+    }
+    start();
+  }
+  async function push() {
+    const m = meta(); if (!token() || !m.gistId || busy) return;
+    const data = collect(), h = hashOf(data);
+    if (h === m.lastHash) return;
+    busy = true;
+    try {
+      const syncAt = Date.now();
+      await gh('/gists/' + m.gistId, { method: 'PATCH', body: JSON.stringify({ files: { [FILE]: { content: JSON.stringify({ app: 'my-chart', syncAt, data }) } } }) });
+      setMeta({ lastHash: h, lastSyncAt: syncAt }); api.lastError = '';
+    } catch (e) { api.lastError = e.message; }
+    finally { busy = false; }
+  }
+  async function pull(force) {
+    const m = meta(); if (!token() || !m.gistId || busy) return;
+    busy = true;
+    try {
+      const remote = await readRemote(m.gistId);
+      api.lastError = '';
+      if (remote && remote.syncAt > (m.lastSyncAt || 0) && hashOf(remote.data || {}) !== hashOf(collect())) { busy = false; apply(remote); return; }
+      if (force) toast('이미 최신이에요');
+    } catch (e) { api.lastError = e.message; if (force) toast('동기화 실패: ' + e.message); }
+    finally { busy = false; }
+  }
+  function start() {
+    clearInterval(timer);
+    timer = setInterval(() => { if (!document.hidden) push(); }, 4000);           // 바뀐 게 있으면 4초 안에 올림
+    setInterval(() => { if (!document.hidden) pull(); }, 60000);               // 1분마다 다른 기기 변경 확인
+    document.addEventListener('visibilitychange', () => { if (document.hidden) push(); else pull(); });
+    window.addEventListener('pagehide', () => push());
+  }
+  function disconnect() { clearInterval(timer); localStorage.removeItem('sync:token'); localStorage.removeItem('sync:meta'); }
+  async function init() { if (!token() || !meta().gistId) return; await pull(); start(); }
+  return Object.assign(api, { token, meta, connect, push, pull, disconnect, init });
+})();
+
 // ───────── 시작 ─────────
 let rsTimer;
 window.addEventListener('resize', () => { clearTimeout(rsTimer); rsTimer = setTimeout(() => cells.forEach(c => c.chart.resize()), 50); });
@@ -1326,7 +1478,8 @@ renderLeft();
 loadLayout(curLayout);
 if (innerWidth < 700 && !LS.get('seen', false)) { L.wlOpen = false; applyWl(); }
 LS.set('seen', true);
+Sync.init();
 if (MOCK) toast('테스트 모드 (가짜 데이터)');
-window.__cells = () => cells; window.__L = () => L;
+window.__cells = () => cells; window.__L = () => L; window.__sync = Sync;
 Object.defineProperty(window, '__chart', { get: () => activeCell().chart });
 })();
