@@ -386,38 +386,43 @@ function wickCalc(list, p) {
   const run = side => {
     const sig = i => rsi[i] != null && cci[i] != null && atr[i] != null && liqOk(i) &&
       (side > 0 ? rsi[i] <= rsiTh && cci[i] <= -cciTh : rsi[i] >= 100 - rsiTh && cci[i] >= cciTh);
+    // 매 봉: ① 봉이 진행되는 동안 대기 중인 지정가 체결 확인 → ② 봉 마감 후 새 신호면 지정가를 (다시) 건다
     let i = 0, pend = -1;
     while (i < n) {
+      if (pend >= 0 && i > pend) {
+        const T = trades[trades.length - 1], s = pend;
+        if (i - pend > nwin) pend = -1;
+        else if (side > 0 ? l[i] * (1 + WICK_THRU) < T.lim : h[i] * (1 - WICK_THRU) > T.lim) {
+          pend = -1;
+          const e = side > 0 ? Math.min(T.lim, o[i]) : Math.max(T.lim, o[i]);
+          const sd = atrK * atr[s];
+          if (!(sd > 0) || sd / e > 0.1) { T.skip = true; T.exp = i; }
+          else {
+            const stop = e - side * sd, tgt = e + side * rr * sd;
+            Object.assign(T, { ent: i, e, sl: stop, tp: tgt, exp: i });
+            let j = i, R = null, res = null, xp = null;
+            if (side > 0 ? l[i] <= stop : h[i] >= stop) { R = -1; res = 'sl'; xp = stop; }
+            else {
+              for (j = i + 1; j <= Math.min(n - 1, i + H); j++) {
+                if (side > 0 ? l[j] <= stop : h[j] >= stop) { R = -1; res = 'sl'; xp = stop; break; }
+                if (side > 0 ? h[j] >= tgt : l[j] <= tgt) { R = rr; res = 'tp'; xp = tgt; break; }
+              }
+              if (res == null) {
+                if (i + H <= n - 1) { j = i + H; xp = c[j]; R = side * (xp - e) / sd; res = 'time'; }
+                else { j = n - 1; xp = c[j]; R = side * (xp - e) / sd; res = 'open'; }
+              }
+            }
+            Object.assign(T, { x: j, xp, res, R: R - WICK_COST * e / sd });
+            i = j + 1; continue;
+          }
+        }
+      }
       if (sig(i)) {
-        if (pend >= 0 && trades.length && trades[trades.length - 1].ent < 0 && trades[trades.length - 1].side === side) trades[trades.length - 1].exp = i - 1; // 새 신호로 교체
+        if (pend >= 0) trades[trades.length - 1].exp = i; // 아직 미체결인 이전 주문은 여기서 새 주문으로 교체
         pend = i;
         trades.push({ side, s: i, lim: side > 0 ? l[i] * (1 - offPct / 100) : h[i] * (1 + offPct / 100), exp: Math.min(n - 1, i + nwin), ent: -1 });
-        i++; continue;
       }
-      if (pend < 0 || i - pend > nwin) { pend = -1; i++; continue; }
-      const T = trades[trades.length - 1], s = pend;
-      const filled = side > 0 ? l[i] * (1 + WICK_THRU) < T.lim : h[i] * (1 - WICK_THRU) > T.lim;
-      if (!filled) { i++; continue; }
-      pend = -1;
-      const e = side > 0 ? Math.min(T.lim, o[i]) : Math.max(T.lim, o[i]);
-      const sd = atrK * atr[s];
-      if (!(sd > 0) || sd / e > 0.1) { T.skip = true; T.exp = i; i++; continue; }
-      const stop = e - side * sd, tgt = e + side * rr * sd;
-      Object.assign(T, { ent: i, e, sl: stop, tp: tgt, exp: i });
-      let j = i, R = null, res = null, xp = null;
-      if (side > 0 ? l[i] <= stop : h[i] >= stop) { R = -1; res = 'sl'; xp = stop; }
-      else {
-        for (j = i + 1; j <= Math.min(n - 1, i + H); j++) {
-          if (side > 0 ? l[j] <= stop : h[j] >= stop) { R = -1; res = 'sl'; xp = stop; break; }
-          if (side > 0 ? h[j] >= tgt : l[j] <= tgt) { R = rr; res = 'tp'; xp = tgt; break; }
-        }
-        if (res == null) {
-          if (i + H <= n - 1) { j = i + H; xp = c[j]; R = side * (xp - e) / sd; res = 'time'; }
-          else { j = n - 1; xp = c[j]; R = side * (xp - e) / sd; res = 'open'; }
-        }
-      }
-      Object.assign(T, { x: j, xp, res, R: R - WICK_COST * e / sd });
-      i = j + 1;
+      i++;
     }
   };
   if (dir !== 3) run(1);
