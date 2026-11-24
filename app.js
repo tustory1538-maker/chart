@@ -24,11 +24,11 @@ const TFS = {
   '1M':[{type:'month',span:1},2592e6]
 };
 const TF_SHOW = Object.keys(TFS);
-const MAIN_INDS = ['MA','EMA','SMA','BOLL','SAR','BBI','NWE','WICK'];
+const MAIN_INDS = ['MA','EMA','SMA','BOLL','SAR','BBI','NWE','WICK','CM'];
 const SUB_INDS = ['VOL','RSI','STOCH','MACD','KDJ','CCI','OBV','DMI','WR','ROC','MTM','TRIX','BIAS'];
-const IND_NAMES = { MA:'이동평균', EMA:'지수이동평균', SMA:'평활이동평균', BOLL:'볼린저밴드', SAR:'파라볼릭 SAR', BBI:'BBI', NWE:'나다라야-왓슨 엔벨로프', WICK:'꼬리받기 백테스트 (RSI·CCI 지정가)', VOL:'거래량', RSI:'RSI', STOCH:'스토캐스틱 (슬로우)', MACD:'MACD', KDJ:'KDJ', CCI:'CCI', OBV:'OBV', DMI:'DMI', WR:'윌리엄스 %R', ROC:'ROC', MTM:'모멘텀', TRIX:'TRIX', BIAS:'이격도' };
+const IND_NAMES = { MA:'이동평균', EMA:'지수이동평균', SMA:'평활이동평균', BOLL:'볼린저밴드', SAR:'파라볼릭 SAR', BBI:'BBI', NWE:'나다라야-왓슨 엔벨로프', WICK:'꼬리받기 백테스트 (RSI·CCI 지정가)', CM:'캔들매매법 (기준선·깊이·구간·캔들군 신호)', VOL:'거래량', RSI:'RSI', STOCH:'스토캐스틱 (슬로우)', MACD:'MACD', KDJ:'KDJ', CCI:'CCI', OBV:'OBV', DMI:'DMI', WR:'윌리엄스 %R', ROC:'ROC', MTM:'모멘텀', TRIX:'TRIX', BIAS:'이격도' };
 const VAR_PARAMS = ['MA','EMA','SMA','RSI','WR','BIAS'];
-const PARAM_NAMES = { WICK: ['RSI 기준(롱≤, 숏≥100-값)', 'CCI 기준(±)', '지정가 간격 %', '대기 봉 수', '손절 ATR 배수', '손익비', '최대 보유 봉 수', '24h 거래대금 하한(백만)', '방향 (1=양쪽, 2=롱, 3=숏)'], NWE: ['대역폭', '배수', '리페인트 (1=켬, 0=끔)'], STOCH: ['%K 기간', '%K 스무딩', '%D 기간'], BOLL: ['기간', '표준편차'], MACD: ['단기', '장기', '시그널'], KDJ: ['기간', 'K', 'D'] };
+const PARAM_NAMES = { CM: ['적깊 비율 (파동 높이 대비)', '손익비', '최대 보유 봉 수', '최대 손절 %', '방향 (1=양쪽, 2=매수, 3=매도)', '위치 필터 (1=켬, 0=끔)', '무효 신호 표시 (1=켬, 0=끔)'], WICK: ['RSI 기준(롱≤, 숏≥100-값)', 'CCI 기준(±)', '지정가 간격 %', '대기 봉 수', '손절 ATR 배수', '손익비', '최대 보유 봉 수', '24h 거래대금 하한(백만)', '방향 (1=양쪽, 2=롱, 3=숏)'], NWE: ['대역폭', '배수', '리페인트 (1=켬, 0=끔)'], STOCH: ['%K 기간', '%K 스무딩', '%D 기간'], BOLL: ['기간', '표준편차'], MACD: ['단기', '장기', '시그널'], KDJ: ['기간', 'K', 'D'] };
 // 오실레이터 기준선 기본값 (상단·중단·하단)
 // 지표별 기본 선 색 (트뷰 원본과 같게)
 const IND_LINE_DEF = { NWE: [{ color: '#089981', size: 1 }, { color: '#F23645', size: 1 }] };
@@ -441,6 +441,21 @@ registerIndicator({
   }
 });
 
+// 캔들매매법: 계산은 candlemaster.js (window.CM). 『캔들(군) 신호』·『파동연상』 규칙을 코드로 옮긴 것
+registerIndicator({
+  name: 'CM', shortName: '캔들매매법', calcParams: [0.10, 2, 48, 3, 1, 1, 1], series: 'price', precision: 2, figures: [],
+  calc: (list, ind) => {
+    const out = list.map(() => ({}));
+    if (!window.CM || list.length < 60) return out;
+    const p = ind.calcParams.map(Number);
+    const r = CM.analyze(list, { jk: p[0] > 0 ? p[0] : 0.1, rr: p[1] > 0 ? p[1] : 2, maxHold: Math.max(1, Math.round(p[2] || 48)), maxStopPct: p[3] > 0 ? p[3] : 3, dir: Math.round(p[4] || 1), noFilter: Math.round(p[5]) === 0 });
+    r.levels = CM.levelsForDisplay(r, list);
+    r.showBad = Math.round(p[6]) !== 0;
+    out[out.length - 1].cm = r;
+    return out;
+  }
+});
+
 registerIndicator({
   name: 'STOCH', shortName: 'Stoch', calcParams: [14, 3, 3], precision: 2,
   figures: [{ key: 'k', title: '%K: ', type: 'line' }, { key: 'd', title: '%D: ', type: 'line' }],
@@ -785,6 +800,83 @@ class Cell {
           ctx.fillStyle = 'rgba(19,23,34,0.75)'; ctx.fillRect(bx, by, w + 16, 22);
           ctx.fillStyle = '#d1d4dc'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + 8, by + 11);
         }
+        ctx.restore();
+        return false;
+      };
+    }
+    if (n === 'CM') {
+      o.precision = this.pp;
+      const self = this;
+      o.draw = ({ ctx, indicator, xAxis, yAxis, bounding }) => {
+        const res = indicator.result || [], r = res.length && res[res.length - 1].cm;
+        if (!r) return false;
+        const vr = self.chart.getVisibleRange(), data = self.chart.getDataList(), last = data.length - 1;
+        const X = i => xAxis.convertToPixel(i), Y = v => yAxis.convertToPixel(v), W = bounding.width;
+        const G = '#089981', Rd = '#F23645', B = '#2962FF', Gy = '#787b86', Or = '#FF9800';
+        const fmtR = v => (v >= 0 ? '+' : '') + v.toFixed(2) + 'R', pp = self.pp;
+        ctx.save(); ctx.font = '11px sans-serif';
+        const tag = (txt, x, y, col, align) => { ctx.font = '11px sans-serif'; const w = ctx.measureText(txt).width; const x0 = align === 'right' ? x - w - 8 : x; ctx.fillStyle = 'rgba(19,23,34,0.7)'; ctx.fillRect(x0, y - 8, w + 8, 16); ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(txt, x0 + 4, y); };
+        // ① 하이로우 기준선 + 전고·전저의 적깊/비깊/어깊 띠
+        const jk = r.P.jk;
+        for (const lv of r.levels) {
+          const col = lv.t > 0 ? Rd : G, x0 = Math.max(0, X(lv.i)), y = Y(lv.p), big = lv.s >= 2;
+          if (big) {
+            const step = jk * lv.h, dirn = lv.t > 0 ? 1 : -1;
+            [[0, 1, 0.10], [1, 2, 0.07], [2, 3, 0.04]].forEach(([a, b2, al]) => {
+              const ya = Y(lv.p + dirn * a * step), yb = Y(lv.p + dirn * b2 * step);
+              ctx.fillStyle = lv.t > 0 ? `rgba(242,54,69,${al})` : `rgba(8,153,129,${al})`;
+              ctx.fillRect(x0, Math.min(ya, yb), W - x0, Math.abs(yb - ya));
+            });
+            ctx.fillStyle = col; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.font = '10px sans-serif';
+            ['적깊', '비깊', '어깊'].forEach((t, k) => ctx.fillText(t, W - 70, Y(lv.p + dirn * (k + 0.5) * step)));
+          }
+          ctx.strokeStyle = col; ctx.lineWidth = big ? 1.5 : 1; ctx.setLineDash(big ? [] : lv.s === 1 ? [6, 3] : [2, 3]);
+          ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(W, y); ctx.stroke(); ctx.setLineDash([]);
+          tag(`${lv.name} ${lv.p.toFixed(pp)}`, W - 6, y, col, 'right');
+        }
+        // ② 구간 + 구간 변경선
+        const z = r.zones[last];
+        if (z && z.lines) {
+          for (const ln of z.lines) { const y = Y(ln.p); ctx.strokeStyle = Or; ctx.lineWidth = 1; ctx.setLineDash([8, 4]); ctx.beginPath(); ctx.moveTo(Math.max(0, X(z.B.i)), y); ctx.lineTo(W, y); ctx.stroke(); ctx.setLineDash([]); tag(ln.t, Math.max(4, X(z.B.i)), y, Or); }
+          [z.A, z.B].forEach(pv => { ctx.fillStyle = Or; ctx.beginPath(); ctx.arc(X(pv.i), Y(pv.p), 4, 0, Math.PI * 2); ctx.fill(); });
+        }
+        if (z) { const zc = { up: G, upBig: G, upBias: G, dn: Rd, dnBig: Rd, range: Or }[z.code] || Gy; const zt = '구간: ' + z.name; ctx.font = '11px sans-serif'; tag(zt, W / 2 - ctx.measureText(zt).width / 2, 14, zc); }
+        // ③ 캔들(군) 신호
+        for (const sg of r.signals) {
+          if (sg.i < vr.from - 1 || sg.i > vr.to + 1) continue;
+          if (!sg.ok && !r.showBad) continue;
+          const k = data[sg.i], col = !sg.ok ? Gy : sg.side > 0 ? G : Rd, x = X(sg.i);
+          const y = sg.side > 0 ? Y(k.low) + 8 : Y(k.high) - 8;
+          ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.font = (sg.ok ? 'bold ' : '') + '11px sans-serif';
+          ctx.textBaseline = sg.side > 0 ? 'top' : 'bottom';
+          const lab = (sg.side > 0 ? '▲매수' : '▼매도') + (sg.ok ? '' : '✕');
+          const sub = sg.name + (sg.lv ? ' · ' + sg.lv.name + ' ' + sg.lv.dn : '') + (sg.ok && sg.grade !== '-' ? ' [' + sg.grade + ']' : '');
+          if (sg.side > 0) { ctx.fillText(lab, x, y); ctx.font = '10px sans-serif'; ctx.fillText(sub, x, y + 14); }
+          else { ctx.fillText(lab, x, y); ctx.font = '10px sans-serif'; ctx.fillText(sub, x, y - 14); }
+        }
+        // ④ 포지션 (진입·손절·익절·청산)
+        for (const t of r.trades) {
+          if (t.x < vr.from - 1 || t.ent > vr.to + 1) continue;
+          const x0 = X(t.ent), x1 = Math.max(X(t.x), x0 + 4), ye = Y(t.e), yt = Y(t.tp), yS = Y(t.sl);
+          ctx.fillStyle = 'rgba(8,153,129,0.13)'; ctx.fillRect(x0, Math.min(ye, yt), x1 - x0, Math.abs(yt - ye));
+          ctx.fillStyle = 'rgba(242,54,69,0.13)'; ctx.fillRect(x0, Math.min(ye, yS), x1 - x0, Math.abs(yS - ye));
+          ctx.lineWidth = 1;
+          [[yt, G], [yS, Rd], [ye, Gy]].forEach(([yy, c]) => { ctx.strokeStyle = c; ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke(); });
+          ctx.fillStyle = B; ctx.beginPath(); ctx.arc(x0, ye, 3.5, 0, Math.PI * 2); ctx.fill();
+          const col = t.res === 'tp' ? G : t.res === 'sl' ? Rd : Gy, yx = Y(t.xp);
+          ctx.strokeStyle = col; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x1 - 4, yx - 4); ctx.lineTo(x1 + 4, yx + 4); ctx.moveTo(x1 + 4, yx - 4); ctx.lineTo(x1 - 4, yx + 4); ctx.stroke();
+          const lab = { tp: '익절 ', sl: '손절 ', time: '시간청산 ', rev: '반대신호 청산 ', open: '진행 중 ' }[t.res] + fmtR(t.R);
+          ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = 'bold 11px sans-serif'; ctx.fillText(lab, x1 + 7, yx);
+          if (t.res === 'open') { ctx.font = '11px sans-serif'; tag(`손절 ${t.sl.toFixed(pp)}`, W - 6, yS, Rd, 'right'); tag(`익절 ${t.tp.toFixed(pp)}`, W - 6, yt, G, 'right'); }
+        }
+        // ⑤ 요약 (불러온 데이터 전체)
+        const sm = CM.summary(r.trades), b = CM.summary(r.trades.filter(t => t.side > 0)), s2 = CM.summary(r.trades.filter(t => t.side < 0));
+        const nOk = r.signals.filter(x => x.ok).length;
+        const txt = `캔들매매법 · 신호 ${r.signals.length} (유효 ${nOk}) · 거래 ${sm.n} · 승률 ${(sm.wr * 100).toFixed(0)}% · 평균 ${fmtR(sm.avg)} · 합계 ${fmtR(sm.sum)}  |  매수 ${b.n}건 ${fmtR(b.avg)} · 매도 ${s2.n}건 ${fmtR(s2.avg)}`;
+        ctx.font = '12px sans-serif'; const w = ctx.measureText(txt).width, bx = 8, by = bounding.height - 30;
+        ctx.fillStyle = 'rgba(19,23,34,0.75)'; ctx.fillRect(bx, by, w + 16, 22);
+        ctx.fillStyle = '#d1d4dc'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + 8, by + 11);
         ctx.restore();
         return false;
       };
