@@ -24,12 +24,14 @@ const TFS = {
   '1M':[{type:'month',span:1},2592e6]
 };
 const TF_SHOW = Object.keys(TFS);
-const MAIN_INDS = ['MA','EMA','SMA','BOLL','SAR','BBI'];
+const MAIN_INDS = ['MA','EMA','SMA','BOLL','SAR','BBI','NWE'];
 const SUB_INDS = ['VOL','RSI','STOCH','MACD','KDJ','CCI','OBV','DMI','WR','ROC','MTM','TRIX','BIAS'];
-const IND_NAMES = { MA:'이동평균', EMA:'지수이동평균', SMA:'평활이동평균', BOLL:'볼린저밴드', SAR:'파라볼릭 SAR', BBI:'BBI', VOL:'거래량', RSI:'RSI', STOCH:'스토캐스틱 (슬로우)', MACD:'MACD', KDJ:'KDJ', CCI:'CCI', OBV:'OBV', DMI:'DMI', WR:'윌리엄스 %R', ROC:'ROC', MTM:'모멘텀', TRIX:'TRIX', BIAS:'이격도' };
+const IND_NAMES = { MA:'이동평균', EMA:'지수이동평균', SMA:'평활이동평균', BOLL:'볼린저밴드', SAR:'파라볼릭 SAR', BBI:'BBI', NWE:'나다라야-왓슨 엔벨로프', VOL:'거래량', RSI:'RSI', STOCH:'스토캐스틱 (슬로우)', MACD:'MACD', KDJ:'KDJ', CCI:'CCI', OBV:'OBV', DMI:'DMI', WR:'윌리엄스 %R', ROC:'ROC', MTM:'모멘텀', TRIX:'TRIX', BIAS:'이격도' };
 const VAR_PARAMS = ['MA','EMA','SMA','RSI','WR','BIAS'];
-const PARAM_NAMES = { STOCH: ['%K 기간', '%K 스무딩', '%D 기간'], BOLL: ['기간', '표준편차'], MACD: ['단기', '장기', '시그널'], KDJ: ['기간', 'K', 'D'] };
+const PARAM_NAMES = { NWE: ['대역폭', '배수', '리페인트 (1=켬, 0=끔)'], STOCH: ['%K 기간', '%K 스무딩', '%D 기간'], BOLL: ['기간', '표준편차'], MACD: ['단기', '장기', '시그널'], KDJ: ['기간', 'K', 'D'] };
 // 오실레이터 기준선 기본값 (상단·중단·하단)
+// 지표별 기본 선 색 (트뷰 원본과 같게)
+const IND_LINE_DEF = { NWE: [{ color: '#089981', size: 1 }, { color: '#F23645', size: 1 }] };
 const LEVEL_DEF = { RSI: [70, 50, 30], STOCH: [80, 50, 20], KDJ: [80, 50, 20], CCI: [100, 0, -100], WR: [-20, -50, -80], MACD: [0], ROC: [0], MTM: [0], TRIX: [0], BIAS: [0] };
 const FIXED_RANGE = { RSI: [0, 100], STOCH: [0, 100] };
 const DRAW_GROUP = 'draw';
@@ -306,6 +308,61 @@ function mockKlines(symbol, tf, { startTime, endTime, limit }) {
 registerLocale('ko-KR', { time: '시간 ', open: '시 ', high: '고 ', low: '저 ', close: '종 ', volume: '거래량 ', change: '변동 ', turnover: '거래대금 ', second: '초', minute: '분', hour: '시간', day: '일', week: '주', month: '월', year: '년' });
 
 // 슬로우 스토캐스틱: %K = SMA(Fast %K, 스무딩), %D = SMA(%K)
+// 나다라야-왓슨 엔벨로프 (LuxAlgo 방식: 가우시안 커널 회귀 ± 평균절대오차 × 배수)
+registerIndicator({
+  name: 'NWE', shortName: 'Nadaraya-Watson Envelope', calcParams: [8, 3, 1], series: 'price', precision: 2,
+  figures: [{ key: 'upper', title: 'Upper: ', type: 'line' }, { key: 'lower', title: 'Lower: ', type: 'line' }],
+  calc: (list, ind) => {
+    const h = Math.max(0.01, +ind.calcParams[0] || 8), mult = +ind.calcParams[1] || 3, repaint = (ind.calcParams[2] ?? 1) >= 1;
+    const n = list.length, W = 500, out = list.map(() => ({}));
+    const g = x => Math.exp(-(x * x) / (h * h * 2));
+    const src = list.map(k => k.close);
+    if (repaint) {
+      // 최근 500봉 전체를 앞뒤 봉까지 써서 매끄럽게 (새 봉이 오면 과거 값도 바뀜 = 트뷰 기본값과 동일)
+      const start = Math.max(0, n - W), m = n - start; if (m < 2) return out;
+      const y = new Array(m); let sae = 0;
+      for (let i = 0; i < m; i++) {
+        let sum = 0, sw = 0;
+        for (let j = 0; j < m; j++) { const w = g(i - j); sum += src[start + j] * w; sw += w; }
+        y[i] = sum / sw; sae += Math.abs(src[start + i] - y[i]);
+      }
+      sae = sae / Math.min(W - 1, m - 1) * mult;
+      for (let i = 0; i < m; i++) {
+        const k = start + i, up = y[i] + sae, dn = y[i] - sae;
+        out[k] = { upper: up, lower: dn };
+        if (i > 0) {
+          if (src[k] > up && src[k - 1] < up) out[k].sig = -1;       // 위 밴드 돌파 → ▼
+          else if (src[k] < dn && src[k - 1] > dn) out[k].sig = 1;   // 아래 밴드 이탈 → ▲
+          out[k].at = src[k];
+        }
+      }
+    } else {
+      // 리페인트 없음: 각 봉에서 과거 500봉만으로 계산한 끝점 값
+      const coef = []; let den = 0;
+      for (let i = 0; i < W; i++) { coef.push(g(i)); den += g(i); }
+      const est = new Array(n).fill(null), err = new Array(n).fill(null);
+      for (let k = 0; k < n; k++) {
+        let sum = 0, sw = 0;
+        for (let i = 0; i < W && k - i >= 0; i++) { sum += src[k - i] * coef[i]; sw += coef[i]; }
+        est[k] = sum / sw; err[k] = Math.abs(src[k] - est[k]);
+      }
+      let acc = 0; const P = W - 1;
+      for (let k = 0; k < n; k++) {
+        acc += err[k]; if (k >= P) acc -= err[k - P];
+        if (k < 10) continue; // 데이터가 500봉보다 적으면 있는 만큼으로 계산
+        const mae = acc / Math.min(P, k + 1) * mult, up = est[k] + mae, dn = est[k] - mae;
+        out[k] = { upper: up, lower: dn };
+        const pk = out[k - 1];
+        if (pk && pk.upper != null) {
+          if (src[k] > up && src[k - 1] <= pk.upper) { out[k].sig = -1; out[k].at = list[k].high; }
+          else if (src[k] < dn && src[k - 1] >= pk.lower) { out[k].sig = 1; out[k].at = list[k].low; }
+        }
+      }
+    }
+    return out;
+  }
+});
+
 registerIndicator({
   name: 'STOCH', shortName: 'Stoch', calcParams: [14, 3, 3], precision: 2,
   figures: [{ key: 'k', title: '%K: ', type: 'line' }, { key: 'd', title: '%D: ', type: 'line' }],
@@ -501,6 +558,7 @@ class Cell {
     this.pp = info.pp;
     this.removeDrawings();
     this.open24 = null;
+    if (st.main.includes('NWE')) this.refreshIndicator('NWE'); // 가격 소수점 자릿수 맞추기
     this.chart.setStyles({ candle: { tooltip: { title: { template: this.titleTpl() } } } });
     this.chart.setSymbol({ ticker: st.symbol, market: st.market, pricePrecision: info.pp, volumePrecision: info.vp });
     this.fetch24();
@@ -573,10 +631,29 @@ class Cell {
   indOpts(n) {
     const st = this.st, o = { name: n };
     if (st.params[n]) o.calcParams = st.params[n];
-    const ls = st.indStyles[n];
-    if (ls && ls.length) {
+    const ls = st.indStyles[n] || [], def = IND_LINE_DEF[n] || [];
+    if (ls.length || def.length) {
       const base = this.chart.getStyles().indicator.lines;
-      o.styles = { lines: ls.map((l, i) => ({ ...(base[i % base.length]), ...(l || {}) })) };
+      const len = Math.max(ls.length, def.length);
+      o.styles = { lines: Array.from({ length: Math.max(len, def.length) }, (_, i) => ({ ...(base[i % base.length]), ...(def[i] || {}), ...(ls[i] || {}) })) };
+    }
+    if (n === 'NWE') {
+      o.precision = this.pp;
+      const self = this;
+      // 밴드 돌파 지점에 ▼(위, 빨강) / ▲(아래, 초록) 표시
+      o.draw = ({ ctx, indicator, xAxis, yAxis }) => {
+        const res = indicator.result || [], vr = self.chart.getVisibleRange();
+        const lines = (indicator.styles && indicator.styles.lines) || [];
+        const upC = (lines[0] && lines[0].color) || '#089981', dnC = (lines[1] && lines[1].color) || '#F23645';
+        ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+        for (let i = Math.max(0, vr.from - 1); i < Math.min(res.length, vr.to + 1); i++) {
+          const r = res[i]; if (!r || !r.sig) continue;
+          const x = xAxis.convertToPixel(i), y = yAxis.convertToPixel(r.at);
+          if (r.sig < 0) { ctx.fillStyle = dnC; ctx.textBaseline = 'bottom'; ctx.fillText('▼', x, y - 4); }
+          else { ctx.fillStyle = upC; ctx.textBaseline = 'top'; ctx.fillText('▲', x, y + 4); }
+        }
+        return false;
+      };
     }
     if (FIXED_RANGE[n]) { o.minValue = FIXED_RANGE[n][0]; o.maxValue = FIXED_RANGE[n][1]; }
     if (!MAIN_INDS.includes(n)) {
@@ -1069,7 +1146,7 @@ function renderIndEdit() {
     ${params.length ? `<div class="sec">파라미터${pn.length ? ' (' + pn.join(' / ') + ')' : ''}</div><div class="prm">${params.map((p, i) => `<input type="number" min="0.1" step="any" data-pi="${i}" value="${p}" title="${pn[i] || ''}">`).join('')}
       ${VAR_PARAMS.includes(n) ? `<button id="pAdd" title="기간 추가">＋</button><button id="pDel" title="마지막 기간 삭제">－</button>` : ''}</div>` : ''}
     ${lineFigs.length ? `<div class="sec">선 스타일</div>${lineFigs.map((f, i) => {
-      const s = { ...base[i % base.length], ...(cur[i] || {}) };
+      const s = { ...base[i % base.length], ...((IND_LINE_DEF[n] || [])[i] || {}), ...(cur[i] || {}) };
       return `<div class="ln"><span>${esc((f.title || f.key).replace(/[:：]\s*$/, ''))}</span>
         <input type="color" data-lc="${i}" value="${s.color.startsWith('#') ? s.color.slice(0, 7) : '#2962ff'}">
         <select data-lw="${i}">${[1, 2, 3, 4].map(w => `<option value="${w}" ${+s.size === w ? 'selected' : ''}>${w}px</option>`).join('')}</select></div>`;
