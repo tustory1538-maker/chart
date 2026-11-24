@@ -443,7 +443,7 @@ registerIndicator({
 
 // 캔들매매법: 계산은 candlemaster.js (window.CM). 『캔들(군) 신호』·『파동연상』 규칙을 코드로 옮긴 것
 registerIndicator({
-  name: 'CM', shortName: '캔들매매법', calcParams: [0.10, 2, 48, 3, 1, 1, 1], series: 'price', precision: 2, figures: [],
+  name: 'CM', shortName: '캔들매매법', calcParams: [0.10, 2, 48, 3, 2, 1, 1], series: 'price', precision: 2, figures: [],
   calc: (list, ind) => {
     const out = list.map(() => ({}));
     if (!window.CM || list.length < 60) return out;

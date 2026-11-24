@@ -93,7 +93,9 @@ function detect(list, K, i) {
     out.push({ side: -1, code: 'S마', name: '긴 아래꼬리 양봉', stop: L[i].high });
   // 바. (둔탁한) 상승 다람쥐: 작은 캔들군 직후 갑자기 몸통 큰 양봉 3개 (또는 세 번째가 꼬리 없는 큰 양봉)
   if ([i - 2, i - 1, i].every(j => K.bull(j)) && K.quiet(i - 8, i - 3) &&
-      (([i - 2, i - 1, i].every(j => K.mid(j))) || (K.big(i) && u[i] <= 0.1 * b[i])) && L[i].high >= K.hiN(i - 2, 20) * 0.995)
+      (([i - 2, i - 1, i].every(j => K.mid(j))) || (K.big(i) && u[i] <= 0.1 * b[i])) &&
+      // 책 조건: 고가를 낮추는 위치(직전 고가 아래) 또는 직전 고점을 가까스로 돌파한 정도
+      (() => { const ph = K.hiN(i - 8, 30), over = L[i].high - ph; return over <= 0.5 * (K.avgR[i - 3] || 0) && L[i].high >= ph - 1.5 * (K.avgR[i - 3] || 0); })())
     out.push({ side: -1, code: 'S바', name: '둔탁한 상승 다람쥐', stop: L[i].high });
   // 사. 큰 양봉 + 위아래 꼬리 작은 양봉: 서서히 오르던 중 갑자기 큰 양봉, 다음 위아래 꼬리 작은 양봉
   if (K.bull(i - 1) && K.big(i - 1) && K.quiet(i - 7, i - 2) && K.bull(i) && K.small(i) && u[i] >= 0.4 * b[i] && d[i] >= 0.4 * b[i])
