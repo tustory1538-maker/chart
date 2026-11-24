@@ -24,11 +24,11 @@ const TFS = {
   '1M':[{type:'month',span:1},2592e6]
 };
 const TF_SHOW = Object.keys(TFS);
-const MAIN_INDS = ['MA','EMA','SMA','BOLL','SAR','BBI','NWE'];
+const MAIN_INDS = ['MA','EMA','SMA','BOLL','SAR','BBI','NWE','WICK'];
 const SUB_INDS = ['VOL','RSI','STOCH','MACD','KDJ','CCI','OBV','DMI','WR','ROC','MTM','TRIX','BIAS'];
-const IND_NAMES = { MA:'이동평균', EMA:'지수이동평균', SMA:'평활이동평균', BOLL:'볼린저밴드', SAR:'파라볼릭 SAR', BBI:'BBI', NWE:'나다라야-왓슨 엔벨로프', VOL:'거래량', RSI:'RSI', STOCH:'스토캐스틱 (슬로우)', MACD:'MACD', KDJ:'KDJ', CCI:'CCI', OBV:'OBV', DMI:'DMI', WR:'윌리엄스 %R', ROC:'ROC', MTM:'모멘텀', TRIX:'TRIX', BIAS:'이격도' };
+const IND_NAMES = { MA:'이동평균', EMA:'지수이동평균', SMA:'평활이동평균', BOLL:'볼린저밴드', SAR:'파라볼릭 SAR', BBI:'BBI', NWE:'나다라야-왓슨 엔벨로프', WICK:'꼬리받기 백테스트 (RSI·CCI 지정가)', VOL:'거래량', RSI:'RSI', STOCH:'스토캐스틱 (슬로우)', MACD:'MACD', KDJ:'KDJ', CCI:'CCI', OBV:'OBV', DMI:'DMI', WR:'윌리엄스 %R', ROC:'ROC', MTM:'모멘텀', TRIX:'TRIX', BIAS:'이격도' };
 const VAR_PARAMS = ['MA','EMA','SMA','RSI','WR','BIAS'];
-const PARAM_NAMES = { NWE: ['대역폭', '배수', '리페인트 (1=켬, 0=끔)'], STOCH: ['%K 기간', '%K 스무딩', '%D 기간'], BOLL: ['기간', '표준편차'], MACD: ['단기', '장기', '시그널'], KDJ: ['기간', 'K', 'D'] };
+const PARAM_NAMES = { WICK: ['RSI 기준(롱≤, 숏≥100-값)', 'CCI 기준(±)', '지정가 간격 %', '대기 봉 수', '손절 ATR 배수', '손익비', '최대 보유 봉 수', '24h 거래대금 하한(백만)', '방향 (1=양쪽, 2=롱, 3=숏)'], NWE: ['대역폭', '배수', '리페인트 (1=켬, 0=끔)'], STOCH: ['%K 기간', '%K 스무딩', '%D 기간'], BOLL: ['기간', '표준편차'], MACD: ['단기', '장기', '시그널'], KDJ: ['기간', 'K', 'D'] };
 // 오실레이터 기준선 기본값 (상단·중단·하단)
 // 지표별 기본 선 색 (트뷰 원본과 같게)
 const IND_LINE_DEF = { NWE: [{ color: '#089981', size: 1 }, { color: '#F23645', size: 1 }] };
@@ -363,6 +363,79 @@ registerIndicator({
   }
 });
 
+// 꼬리받기 백테스트: RSI·CCI 과매도(과매수) 신호 → 신호 봉 저가(고가) ± n% 지정가 → ATR 손절, 손익비 익절, 시간 청산
+// 체결은 지정가보다 0.2% 더 뚫고 지나가야 인정, 체결 봉에서 손절가까지 닿았으면 손실로 처리 (보수적)
+const WICK_THRU = 0.002, WICK_COST = 0.0008;
+function wickCalc(list, p) {
+  const [rsiTh, cciTh, offPct, nwin, atrK, rr, H, liqM, dir] = p;
+  const n = list.length, o = list.map(k => k.open), h = list.map(k => k.high), l = list.map(k => k.low), c = list.map(k => k.close);
+  // RSI(14) 와일더
+  const rsi = new Array(n).fill(null); { let up = 0, dn = 0; const a = 1 / 14;
+    for (let i = 0; i < n; i++) { const d = i ? c[i] - c[i - 1] : 0; up = a * Math.max(d, 0) + (1 - a) * up; dn = a * Math.max(-d, 0) + (1 - a) * dn; if (i >= 50) rsi[i] = dn === 0 ? 100 : 100 - 100 / (1 + up / dn); } }
+  // CCI(20)
+  const cci = new Array(n).fill(null), tp = list.map(k => (k.high + k.low + k.close) / 3);
+  for (let i = 19; i < n; i++) { let m = 0; for (let j = i - 19; j <= i; j++) m += tp[j]; m /= 20; let md = 0; for (let j = i - 19; j <= i; j++) md += Math.abs(tp[j] - m); md /= 20; cci[i] = md ? (tp[i] - m) / (0.015 * md) : 0; }
+  // ATR(14) 단순평균
+  const atr = new Array(n).fill(null); { let s = 0; const tr = i => { const pc = i ? c[i - 1] : c[0]; return Math.max(h[i] - l[i], Math.abs(h[i] - pc), Math.abs(l[i] - pc)); };
+    for (let i = 0; i < n; i++) { s += tr(i); if (i >= 14) s -= tr(i - 14); if (i >= 13) atr[i] = s / 14; } }
+  // 최근 24시간 거래대금
+  const liq = new Array(n).fill(0); { let s = 0, a = 0;
+    for (let i = 0; i < n; i++) { s += list[i].turnover || 0; while (list[a].timestamp <= list[i].timestamp - 864e5) { s -= list[a].turnover || 0; a++; } liq[i] = s; } }
+  const liqOk = i => !(liqM > 0) || (list[i].timestamp - list[0].timestamp >= 864e5 - 1 && liq[i] >= liqM * 1e6);
+  const trades = [];
+  const run = side => {
+    const sig = i => rsi[i] != null && cci[i] != null && atr[i] != null && liqOk(i) &&
+      (side > 0 ? rsi[i] <= rsiTh && cci[i] <= -cciTh : rsi[i] >= 100 - rsiTh && cci[i] >= cciTh);
+    let i = 0, pend = -1;
+    while (i < n) {
+      if (sig(i)) {
+        if (pend >= 0 && trades.length && trades[trades.length - 1].ent < 0 && trades[trades.length - 1].side === side) trades[trades.length - 1].exp = i - 1; // 새 신호로 교체
+        pend = i;
+        trades.push({ side, s: i, lim: side > 0 ? l[i] * (1 - offPct / 100) : h[i] * (1 + offPct / 100), exp: Math.min(n - 1, i + nwin), ent: -1 });
+        i++; continue;
+      }
+      if (pend < 0 || i - pend > nwin) { pend = -1; i++; continue; }
+      const T = trades[trades.length - 1], s = pend;
+      const filled = side > 0 ? l[i] * (1 + WICK_THRU) < T.lim : h[i] * (1 - WICK_THRU) > T.lim;
+      if (!filled) { i++; continue; }
+      pend = -1;
+      const e = side > 0 ? Math.min(T.lim, o[i]) : Math.max(T.lim, o[i]);
+      const sd = atrK * atr[s];
+      if (!(sd > 0) || sd / e > 0.1) { T.skip = true; T.exp = i; i++; continue; }
+      const stop = e - side * sd, tgt = e + side * rr * sd;
+      Object.assign(T, { ent: i, e, sl: stop, tp: tgt, exp: i });
+      let j = i, R = null, res = null, xp = null;
+      if (side > 0 ? l[i] <= stop : h[i] >= stop) { R = -1; res = 'sl'; xp = stop; }
+      else {
+        for (j = i + 1; j <= Math.min(n - 1, i + H); j++) {
+          if (side > 0 ? l[j] <= stop : h[j] >= stop) { R = -1; res = 'sl'; xp = stop; break; }
+          if (side > 0 ? h[j] >= tgt : l[j] <= tgt) { R = rr; res = 'tp'; xp = tgt; break; }
+        }
+        if (res == null) {
+          if (i + H <= n - 1) { j = i + H; xp = c[j]; R = side * (xp - e) / sd; res = 'time'; }
+          else { j = n - 1; xp = c[j]; R = side * (xp - e) / sd; res = 'open'; }
+        }
+      }
+      Object.assign(T, { x: j, xp, res, R: R - WICK_COST * e / sd });
+      i = j + 1;
+    }
+  };
+  if (dir !== 3) run(1);
+  if (dir !== 2) run(-1);
+  return trades;
+}
+registerIndicator({
+  name: 'WICK', shortName: '꼬리받기', calcParams: [25, 150, 0.8, 3, 1.5, 1.5, 24, 5, 1], series: 'price', precision: 2, figures: [],
+  calc: (list, ind) => {
+    const p = ind.calcParams.map(Number);
+    const trades = wickCalc(list, [p[0], p[1], p[2], Math.max(1, Math.round(p[3])), p[4], p[5], Math.max(1, Math.round(p[6])), p[7], Math.round(p[8] || 1)]);
+    const out = list.map(() => ({}));
+    trades.forEach(t => { (out[t.s].tr = out[t.s].tr || []).push(t); });
+    if (out.length) out[out.length - 1].all = trades;
+    return out;
+  }
+});
+
 registerIndicator({
   name: 'STOCH', shortName: 'Stoch', calcParams: [14, 3, 3], precision: 2,
   figures: [{ key: 'k', title: '%K: ', type: 'line' }, { key: 'd', title: '%D: ', type: 'line' }],
@@ -652,6 +725,62 @@ class Cell {
           if (r.sig < 0) { ctx.fillStyle = dnC; ctx.textBaseline = 'bottom'; ctx.fillText('▼', x, y - 4); }
           else { ctx.fillStyle = upC; ctx.textBaseline = 'top'; ctx.fillText('▲', x, y + 4); }
         }
+        return false;
+      };
+    }
+    if (n === 'WICK') {
+      o.precision = this.pp;
+      const self = this;
+      o.draw = ({ ctx, indicator, xAxis, yAxis, bounding }) => {
+        const res = indicator.result || [], vr = self.chart.getVisibleRange();
+        const all = (res.length && res[res.length - 1].all) || [], data = self.chart.getDataList();
+        const X = i => xAxis.convertToPixel(i), Y = v => yAxis.convertToPixel(v);
+        const G = '#089981', Rd = '#F23645', B = '#2962FF', Gy = '#787b86';
+        const fmtR = r => (r >= 0 ? '+' : '') + r.toFixed(2) + 'R';
+        ctx.save();
+        ctx.font = '11px sans-serif';
+        for (const t of all) {
+          const last = t.ent >= 0 ? t.x : t.exp;
+          if (last < vr.from - 1 || t.s > vr.to + 1) continue;
+          const xs = X(t.s), ys = t.side > 0 ? Y(data[t.s].low) + 10 : Y(data[t.s].high) - 10;
+          // 신호 표시
+          ctx.fillStyle = t.side > 0 ? G : Rd; ctx.textAlign = 'center'; ctx.textBaseline = t.side > 0 ? 'top' : 'bottom';
+          ctx.fillText(t.side > 0 ? '△' : '▽', xs, t.side > 0 ? ys - 6 : ys + 6);
+          // 지정가 대기선 (점선)
+          const xEnd = X(t.ent >= 0 ? t.ent : t.exp), yl = Y(t.lim);
+          ctx.strokeStyle = B; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+          ctx.beginPath(); ctx.moveTo(xs, yl); ctx.lineTo(xEnd, yl); ctx.stroke(); ctx.setLineDash([]);
+          if (t.ent < 0) { ctx.fillStyle = Gy; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.skip ? '건너뜀' : '미체결', xEnd + 4, yl); continue; }
+          // 포지션 박스 (익절 구간 초록, 손절 구간 빨강)
+          const x0 = X(t.ent), x1 = Math.max(X(t.x), x0 + 4), ye = Y(t.e), yt = Y(t.tp), yS = Y(t.sl);
+          ctx.fillStyle = 'rgba(8,153,129,0.13)'; ctx.fillRect(x0, Math.min(ye, yt), x1 - x0, Math.abs(yt - ye));
+          ctx.fillStyle = 'rgba(242,54,69,0.13)'; ctx.fillRect(x0, Math.min(ye, yS), x1 - x0, Math.abs(yS - ye));
+          ctx.lineWidth = 1;
+          [[yt, G], [yS, Rd], [ye, Gy]].forEach(([yy, col]) => { ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke(); });
+          // 진입점
+          ctx.fillStyle = B; ctx.beginPath(); ctx.arc(x0, ye, 3.5, 0, Math.PI * 2); ctx.fill();
+          // 청산점 + 결과
+          const col = t.res === 'tp' ? G : t.res === 'sl' ? Rd : Gy, yx = Y(t.xp);
+          ctx.strokeStyle = col; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x1 - 4, yx - 4); ctx.lineTo(x1 + 4, yx + 4); ctx.moveTo(x1 + 4, yx - 4); ctx.lineTo(x1 - 4, yx + 4); ctx.stroke();
+          const lab = { tp: '익절 ', sl: '손절 ', time: '시간청산 ', open: '진행 중 ' }[t.res] + fmtR(t.R);
+          ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = 'bold 11px sans-serif';
+          ctx.fillText(lab, x1 + 7, yx); ctx.font = '11px sans-serif';
+        }
+        // 요약 (불러온 데이터 전체 기준)
+        const done = all.filter(t => t.ent >= 0 && t.res !== 'open');
+        if (done.length || all.length) {
+          const win = done.filter(t => t.R > 0).length, sum = done.reduce((a, t) => a + t.R, 0);
+          const nl = done.filter(t => t.side > 0).length;
+          const txt = done.length
+            ? `꼬리받기 · 신호 ${all.length} · 체결 ${done.length} (롱 ${nl} / 숏 ${done.length - nl}) · 승률 ${(win / done.length * 100).toFixed(0)}% · 평균 ${fmtR(sum / done.length)} · 합계 ${fmtR(sum)}`
+            : `꼬리받기 · 신호 ${all.length} · 체결 0`;
+          ctx.font = '12px sans-serif'; const w = ctx.measureText(txt).width;
+          const bx = 8, by = bounding.height - 30;
+          ctx.fillStyle = 'rgba(19,23,34,0.75)'; ctx.fillRect(bx, by, w + 16, 22);
+          ctx.fillStyle = '#d1d4dc'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + 8, by + 11);
+        }
+        ctx.restore();
         return false;
       };
     }
