@@ -620,6 +620,14 @@ function fmtCountdown(ms) {
   return `${p(m)}:${p(s)}`;
 }
 
+// ───────── 하이킨아시 ─────────
+function haBar(b, p) {
+  const c = (b.open + b.high + b.low + b.close) / 4, o = p ? (p.open + p.close) / 2 : (b.open + b.close) / 2;
+  return { ...b, open: o, close: c, high: Math.max(b.high, o, c), low: Math.min(b.low, o, c) };
+}
+function haSeries(list) { const out = []; let p = null; for (const b of list) { p = haBar(b, p); out.push(p); } return out; }
+const isHA = () => L && L.settings.chartType === 'heikin_ashi';
+
 // ───────── 작도 되돌리기 (Ctrl+Z / Ctrl+Y) ─────────
 const drawUid = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 let lastOvRC = 0;
@@ -698,14 +706,14 @@ class Cell {
           }
           else if (type === 'forward') data = await fetchKlines(symbol.market, symbol.ticker, tf, { endTime: timestamp - 1 });
           if (tok !== self.token()) return;
-          callback(data, { forward: data.length >= batchSize(symbol.market, tf), backward: false });
+          callback(type === 'init' ? self.haInit(data) : self.haOlder(data), { forward: data.length >= batchSize(symbol.market, tf), backward: false });
           if (type === 'init') self.afterInit(data);
         } catch (e) { if (tok === self.token()) { toast('데이터 로드 실패: ' + e.message, 4000); callback([], false); } }
       },
       subscribeBar({ symbol, period, callback }) {
         self.ws && self.ws.close();
         const tf = tfOfPeriod(period), ms = TFS[tf][1];
-        const push = bar => { callback(bar); self.onBar(bar); };
+        const push = bar => { const h = self.haLive(bar); if (h) callback(h); self.onBar(bar); };
         if (MOCK) {
           const k = mockK(symbol.ticker);
           const id = setInterval(() => { const ts = Math.floor(Date.now() / ms) * ms; const b = mockBar(ts, ms, k); b.close = mockPrice(Date.now(), k); b.high = Math.max(b.high, b.close); b.low = Math.min(b.low, b.close); push(b); }, 1000);
@@ -741,13 +749,13 @@ class Cell {
             const past = await fetchKlines(symbol.market, symbol.ticker, tf, { endTime: R.T - ms }); // 리플레이 시점 이전에 완성된 봉만
             if (tok !== self.token()) return;
             Object.assign(self.rp, { buffer: [], done: false, fetching: false, fetchedTo: past.length ? past[past.length - 1].timestamp : R.T - ms });
-            callback(past, { forward: past.length >= batchSize(symbol.market, tf), backward: false });
+            callback(self.haInit(past), { forward: past.length >= batchSize(symbol.market, tf), backward: false });
             self.afterInit(past);
             self.refill();
           } else if (type === 'forward') {
             const data = await fetchKlines(symbol.market, symbol.ticker, tf, { endTime: timestamp - 1 });
             if (tok !== self.token()) return;
-            callback(data, { forward: data.length >= batchSize(symbol.market, tf), backward: false });
+            callback(self.haOlder(data), { forward: data.length >= batchSize(symbol.market, tf), backward: false });
           } else callback([], false);
         } catch (e) { if (tok === self.token()) { toast('데이터 로드 실패: ' + e.message, 4000); callback([], false); } }
       },
@@ -756,6 +764,15 @@ class Cell {
     };
   }
   get st() { return L.cells[this.idx]; }
+  // 하이킨아시: 처음 받은 데이터는 통째로, 실시간 봉은 직전 봉 기준으로 변환 (원래 가격은 lastBar에 그대로)
+  haInit(list) { this.haMode = isHA(); if (!isHA()) return list; const out = haSeries(list); this.haCur = out[out.length - 1] || null; this.haPrev = out[out.length - 2] || null; return out; }
+  haOlder(list) { return isHA() ? haSeries(list) : list; }
+  haLive(bar) {
+    if (!isHA()) return bar;
+    if (this.haCur && bar.timestamp < this.haCur.timestamp) return null;
+    if (this.haCur && bar.timestamp > this.haCur.timestamp) this.haPrev = this.haCur;
+    return (this.haCur = haBar(bar, this.haPrev));
+  }
   get ms() { return TFS[this.st.tf][1]; }
   token() { return [curLayout, this.uid, R.on ? 'r' + R.id : 'l', this.st.market, this.st.symbol, this.st.tf].join('|'); }
   tokenOf(symbol, period) { return [curLayout, this.uid, R.on ? 'r' + R.id : 'l', symbol.market, symbol.ticker, tfOfPeriod(period)].join('|'); }
@@ -815,7 +832,7 @@ class Cell {
   advanceTo(T) {
     const rp = this.rp; if (!R.on || !rp.cb) return;
     let last = null;
-    while (rp.buffer.length && rp.buffer[0].timestamp + this.ms <= T) { last = rp.buffer.shift(); rp.cb(last); }
+    while (rp.buffer.length && rp.buffer[0].timestamp + this.ms <= T) { last = rp.buffer.shift(); const h = this.haLive(last); if (h) rp.cb(h); }
     if (last) this.onBar(last);
     if (rp.buffer.length < 200) this.refill();
   }
@@ -1117,6 +1134,7 @@ class Cell {
   }
   applyStyles() {
     const s = L.settings, ch = this.chart;
+    if (this.haMode != null && this.haMode !== isHA()) { this.haMode = isHA(); this.haCur = this.haPrev = null; ch.resetData(); } // 하이킨아시 켜고 끌 땐 데이터 다시 받기
     ch.setStyles(s.theme);
     const many = GRIDS[L.grid] >= 4;
     const rule = v => v === 'auto' ? (many ? 'follow_cross' : 'always') : v;
@@ -1126,7 +1144,7 @@ class Cell {
     const tc = s.textColor ? { color: s.textColor } : {};
     ch.setStyles({
       candle: {
-        type: s.chartType,
+        type: s.chartType === 'heikin_ashi' ? 'candle_solid' : s.chartType,
         bar: {
           compareRule: s.compareRule,
           upColor: s.bodyUp, downColor: s.bodyDown, noChangeColor: s.bodyUp,
@@ -1163,8 +1181,9 @@ class Cell {
       const list = this.chart.getDataList(), last = list[list.length - 1] || k;
       let base = this.open24;
       if (!base) { const t = last.timestamp - 864e5; base = (list.find(b => b.timestamp >= t) || list[0] || last).open; }
-      const d = last.close - base, col = d >= 0 ? up : dn;
-      return [{ title: '', value: { text: f(last.close), color: col } }, { title: '', value: { text: chgText(d, base), color: col } }];
+      const px = isHA() && this.lastBar ? this.lastBar.close : last.close; // 하이킨아시여도 현재가는 실제 가격
+      const d = px - base, col = d >= 0 ? up : dn;
+      return [{ title: '', value: { text: f(px), color: col } }, { title: '', value: { text: chgText(d, base), color: col } }];
     }
     const ref = data.prev ? data.prev.close : k.open, d = k.close - ref;
     const col = k.close >= k.open ? up : dn;
@@ -1746,7 +1765,7 @@ $('#btnInd').onclick = e => { e.stopPropagation(); openIndModal(); };
 const STATUS_OPTS = [['auto', '자동 (4분할 이상은 마우스 올릴 때)'], ['always', '항상'], ['follow_cross', '마우스 올릴 때만'], ['none', '숨김']];
 const SET_TABS = [
   { id: 'symbol', t: '종목', items: [
-    { type: 'select', k: 'chartType', label: '차트 종류', opts: [['candle_solid', '캔들'], ['candle_stroke', '속 빈 캔들'], ['candle_up_stroke', '양봉만 속 빈 캔들'], ['ohlc', '바 (OHLC)'], ['area', '영역']] },
+    { type: 'select', k: 'chartType', label: '차트 종류', opts: [['candle_solid', '캔들'], ['candle_stroke', '속 빈 캔들'], ['candle_up_stroke', '양봉만 속 빈 캔들'], ['heikin_ashi', '하이킨아시'], ['ohlc', '바 (OHLC)'], ['area', '영역']] },
     { type: 'sec', label: '캔들 색 (양봉 / 음봉)' },
     { type: 'pair', label: '몸통', k1: 'bodyUp', k2: 'bodyDown' },
     { type: 'pair', label: '테두리', k1: 'borderUp', k2: 'borderDown', chk: 'borderShow' },
@@ -1846,6 +1865,7 @@ const TYPE_ICON = {
   candle_solid: '<svg viewBox="0 0 24 24"><path d="M7 3v4M7 15v5M17 6v3M17 17v3"/><rect x="5" y="7" width="4" height="8" fill="currentColor"/><rect x="15" y="9" width="4" height="8"/></svg>',
   candle_stroke: '<svg viewBox="0 0 24 24"><path d="M7 3v4M7 15v5M17 6v3M17 17v3"/><rect x="5" y="7" width="4" height="8"/><rect x="15" y="9" width="4" height="8"/></svg>',
   candle_up_stroke: '<svg viewBox="0 0 24 24"><path d="M7 3v4M7 15v5M17 6v3M17 17v3"/><rect x="5" y="7" width="4" height="8"/><rect x="15" y="9" width="4" height="8" fill="currentColor"/></svg>',
+  heikin_ashi: '<svg viewBox="0 0 24 24"><path d="M7 5v14M17 4v15"/><rect x="5" y="8" width="4" height="7" fill="currentColor"/><rect x="15" y="6" width="4" height="9" fill="currentColor"/><path d="M11 12h2" stroke-dasharray="1 1"/></svg>',
   ohlc: '<svg viewBox="0 0 24 24"><path d="M8 4v16M5 8h3M8 16h3M16 6v14M13 9h3M16 17h3"/></svg>',
   area: '<svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 6-8 3 3v11H3z" fill="currentColor" opacity=".35"/><path d="M3 17l5-6 4 3 6-8 3 3"/></svg>'
 };
