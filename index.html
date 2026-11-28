@@ -67,11 +67,11 @@
   .gridpick button.on{border-color:var(--accent)}
   #indEdit .lvrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   #indEdit .lvrow input[type=number]{width:70px}
-  #right{width:300px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+  #right{width:360px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
   #right.hide{display:none}
   #right h3{margin:0;padding:10px 12px;font-size:13px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}
   #wl{overflow-y:auto;flex:1}
-  .wl-row,.wl-head{display:grid;grid-template-columns:1fr 78px 62px 58px 14px;gap:4px;align-items:center;padding:7px 8px 7px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  .wl-row,.wl-head{display:grid;grid-template-columns:1fr 74px 56px 58px 58px 16px;gap:4px;align-items:center;padding:7px 8px 7px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
   .wl-head{cursor:default;font-size:11px;color:var(--muted);padding-top:5px;padding-bottom:5px} .wl-head span{text-align:right} .wl-head span:first-child{text-align:left}
   .wl-row .a{text-align:right;font-size:12px}
   .wl-row .p,.wl-row .a,.wl-row .c{color:var(--text)}
@@ -185,7 +185,7 @@
   body.mobile #left{display:none}
   body.mobile #center{grid-column:1;grid-row:2}
   body.mobile #right{position:fixed;inset:0;top:calc(46px + env(safe-area-inset-top));bottom:calc(56px + env(safe-area-inset-bottom));width:auto;z-index:40;border:0}
-  body.mobile #right .wl-row,body.mobile #right .wl-head{grid-template-columns:1fr 100px 80px 70px 18px;padding:12px 14px;font-size:15px}
+  body.mobile #right .wl-row,body.mobile #right .wl-head{grid-template-columns:1fr 96px 72px 64px 24px;padding:12px 14px;font-size:15px}
   body.mobile #right .wl-head{font-size:12px;padding:6px 14px}
   body.mobile #grid{grid-template:1fr/1fr!important}
   body.mobile #grid .cell:not(.act){display:none}
@@ -275,6 +275,15 @@
   body.mobile #alBody select,body.mobile #alBody input{font-size:15px;padding:8px}
   body.mobile #rtabs button{padding:12px 0;font-size:14px}
   body.mobile .al-b button{font-size:18px;padding:4px 9px}
+
+  #wlPick{font-weight:700;font-size:13px;padding:3px 6px;margin-left:-6px}
+  #wlMenu .row .m{margin-left:12px}
+  .wl-head span{white-space:nowrap}
+  .wl-head [data-sort]{cursor:pointer;user-select:none} .wl-head [data-sort]:hover{color:var(--text)} .wl-head [data-sort].on{color:var(--accent)}
+  .wl-row .v{text-align:right;font-size:11px;color:var(--muted)}
+  .wl-row .x.st{visibility:visible;color:var(--muted)} .wl-row .x.st.on{color:#f7c948}
+  body.mobile #right .wl-row .a,body.mobile #right .wl-head .a{display:none}
+  body.mobile #right .wl-row .v{font-size:13px}
 </style>
 </head>
 <body>
@@ -331,7 +340,7 @@
   </div>
   <div id="right">
     <div id="rtabs"><button data-rt="wl">관심종목</button><button data-rt="al">알림 <span id="alCnt"></span></button></div>
-    <div id="wlPane" class="rpane"><h3>관심종목 <button id="wlAdd" title="현재 종목 추가 (Alt+W)">＋ 추가</button></h3>
+    <div id="wlPane" class="rpane"><h3><button id="wlPick" title="목록 바꾸기 · 새 목록">관심종목 ▾</button> <button id="wlAdd" title="현재 종목 추가 (Alt+W)">＋ 추가</button></h3>
     <div id="wl"></div></div>
     <div id="alPane" class="rpane" style="display:none"></div>
   </div>
@@ -376,6 +385,7 @@
   </div>
 </div>
 <div class="menu" id="ctxMenu"></div>
+<div class="menu" id="wlMenu"></div>
 <div class="menu" id="tfInput"><div class="t">타임프레임 바꾸기</div><input id="tfInputBox" type="text" spellcheck="false" autocomplete="off" placeholder="예: 5, 60, 4h, 1d"><div class="m" style="padding:4px 2px 0">숫자만 = 분 · Enter로 적용</div></div>
 <div id="alPops"></div>
 <div id="toast"></div>

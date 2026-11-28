@@ -1368,7 +1368,7 @@ async function renderSymList() {
   let rows = q ? list.filter(x => x.s.includes(q) || (x.n && x.n.includes(qr))) : list;
   if (q) rows = rows.slice().sort((a, b) => (b.s.startsWith(q) - a.s.startsWith(q)) || (b.qv - a.qv));
   symRows = rows.slice(0, 300); symHl = 0;
-  const inWl = s => watchlist.some(w => w.market === symMarket && w.symbol === s);
+  const inWl = s => editList().items.some(w => w.market === symMarket && w.symbol === s);
   box.innerHTML = symRows.map((x, i) => `<div class="sym-row ${i === 0 ? 'hl' : ''}" data-s="${x.s}">
     <span class="st ${inWl(x.s) ? 'on' : ''}" data-star="${x.s}" title="관심종목">${inWl(x.s) ? '★' : '☆'}</span>
     <span class="n">${x.s}${x.n ? ` <small style="color:var(--muted);font-weight:400">${esc(x.n)}</small>` : ''}</span><span class="r">${x.p}</span>
@@ -1544,12 +1544,13 @@ const isTyping = e => { const t = (e.target.tagName || '').toLowerCase(); return
 const overlayOpen = () => !!document.querySelector('.modal.show') || $('#symPanel').classList.contains('show') || $('#tfInput').classList.contains('show');
 // 관심종목 넘기기: ↓·Space 다음, ↑·Shift+Space 이전, Home/End 처음/끝
 function wlNav(dir) {
-  if (!watchlist.length) return toast('관심종목이 비어 있어요');
-  const st = activeCell().st, cur = watchlist.findIndex(w => w.market === st.market && w.symbol === st.symbol);
-  const i = dir === 'first' ? 0 : dir === 'last' ? watchlist.length - 1 : cur < 0 ? (dir > 0 ? 0 : watchlist.length - 1) : cur + dir;
-  if (i < 0 || i >= watchlist.length || i === cur) return;
-  const w = watchlist[i]; changeSymbol(w.market, w.symbol);
-  const row = $('#wl').querySelector(`[data-i="${i}"]`); if (row) row.scrollIntoView({ block: 'nearest' });
+  const list = viewItems();
+  if (!list.length) return toast('관심종목이 비어 있어요');
+  const st = activeCell().st, cur = list.findIndex(w => w.market === st.market && w.symbol === st.symbol);
+  const i = dir === 'first' ? 0 : dir === 'last' ? list.length - 1 : cur < 0 ? (dir > 0 ? 0 : list.length - 1) : cur + dir;
+  if (i < 0 || i >= list.length || i === cur) return;
+  const w = list[i]; changeSymbol(w.market, w.symbol);
+  const row = wlRowMap.get(w.market + ':' + w.symbol); if (row) row.scrollIntoView({ block: 'nearest' });
 }
 // 차트 라이브러리의 방향키 동작보다 먼저 가로채기
 window.addEventListener('keydown', e => {
@@ -1609,7 +1610,7 @@ document.addEventListener('keydown', e => {
     if (e.shiftKey) return;
     const act = {
       KeyA: () => openAlertModal(),
-      KeyW: () => { const st = activeCell().st; if (watchlist.some(w => w.market === st.market && w.symbol === st.symbol)) toast('이미 관심종목에 있어요'); else { toggleWatch(st.market, st.symbol); toast('관심종목에 추가 ★'); } },
+      KeyW: () => { const st = activeCell().st; if (editList().items.some(w => w.market === st.market && w.symbol === st.symbol)) toast('이미 관심종목에 있어요'); else { toggleWatch(st.market, st.symbol); toast('관심종목에 추가 ★'); } },
       KeyR: resetChartView,
       KeyI: () => setVal('invert', !L.settings.invert),
       KeyL: () => setVal('scale', L.settings.scale === 'logarithm' ? 'normal' : 'logarithm'),
@@ -1904,7 +1905,7 @@ function dataTabHTML() {
     <p class="note">레이아웃·작도·지표·관심종목은 기기마다 따로 저장돼요. 내보낸 파일을 다른 기기에서 가져오면 똑같이 옮겨져요.</p>
     <div class="srow btns"><button id="btnExport">⬇ 내보내기</button><button id="btnImport">⬆ 가져오기</button><input type="file" id="importFile" accept=".json,application/json" hidden></div>`;
 }
-const BACKUP_KEY = /^(layouts|curLayout|layout:|draw:|watchlist|toolStyle:|groupCur|alerts$)/;
+const BACKUP_KEY = /^(layouts|curLayout|layout:|draw:|watchlist|wlSort$|toolStyle:|groupCur|alerts$)/;
 function bindDataTab() {
   if ($('#syncOn')) $('#syncOn').onclick = async () => {
     const t = $('#syncToken').value.trim(); if (!t) return;
@@ -2053,96 +2054,208 @@ $('#btnGrid').onclick = e => { e.stopPropagation(); toggleMenu($('#gridMenu'), e
 document.querySelectorAll('.menu').forEach(m => m.addEventListener('click', e => e.stopPropagation()));
 document.addEventListener('click', e => { if (!e.target.closest('.menu')) closeMenus(); });
 
-// ───────── 관심종목 ─────────
+// ───────── 관심종목 (여러 목록 · 바이낸스 전체 목록 · 정렬) ─────────
 const wlPrices = {};
-let wlSockets = [];
-function wlCells(p) {
-  if (!p) return { p: '-', a: '', r: '', cls: '' };
+let wlSockets = [], wlSockSig = '';
+const AUTO_LISTS = { 'all:futures': { name: '바이낸스 선물 전체', market: 'futures' }, 'all:spot': { name: '바이낸스 현물 전체 (USDT)', market: 'spot' } };
+let wlLists = LS.get('watchlists', []); if (!Array.isArray(wlLists)) wlLists = [];
+let wlCur = LS.get('wlCur', 'main');
+let wlSort = LS.get('wlSort', {}); if (!wlSort || typeof wlSort !== 'object') wlSort = {};
+const autoItems = {};
+function listById(id) {
+  if (id === 'main') return { id, name: '관심종목', items: watchlist, editable: true };
+  if (AUTO_LISTS[id]) return { id, name: AUTO_LISTS[id].name, items: autoItems[id] || [], auto: true };
+  const l = wlLists.find(x => x.id === id); return l ? { ...l, editable: true } : null;
+}
+function curList() { return listById(wlCur) || listById('main'); }
+function editList() { const l = curList(); return l.editable ? l : listById('main'); }
+function saveList(l) {
+  if (l.id === 'main') { watchlist = l.items; LS.set('watchlist', watchlist); }
+  else { const x = wlLists.find(y => y.id === l.id); if (x) { x.items = l.items; LS.set('watchlists', wlLists); } }
+}
+function setWlCur(id) {
+  wlCur = id; LS.set('wlCur', id);
+  if (AUTO_LISTS[id]) loadAutoList(id);
+  renderWatchlist(); connectWatchlist(); $('#wl').scrollTop = 0;
+}
+// 바이낸스 전체: 지금 거래 중인 USDT 종목 (24시간 시세에서 최근 하루 안에 거래된 것만)
+async function loadAutoList(id, force) {
+  const m = AUTO_LISTS[id].market, ck = LS.get('wlAll:' + m, null);
+  if (!force && autoItems[id] && autoItems[id].length) return;
+  if (!force && ck && Date.now() - ck.t < 6 * 36e5 && !MOCK) { autoItems[id] = ck.list.map(s => ({ market: m, symbol: s })); if (wlCur === id) { renderWatchlist(); connectWatchlist(); } }
+  try {
+    let arr;
+    if (MOCK) arr = (await loadTickers(m)).map(x => ({ symbol: x.s, lastPrice: x.p, priceChangePercent: x.chg, quoteVolume: x.qv, priceChange: 0, closeTime: Date.now() }));
+    else arr = await (await fetch(`${MARKETS[m].rest}/ticker/24hr`)).json();
+    const now = Date.now();
+    const ok = arr.filter(x => x.symbol.endsWith('USDT') && !x.symbol.includes('_') && +x.quoteVolume > 0 && (!x.closeTime || now - x.closeTime < 864e5));
+    ok.sort((a, b) => b.quoteVolume - a.quoteVolume);
+    ok.forEach(x => setWlPrice(m + ':' + x.symbol, x.lastPrice, null, +x.priceChangePercent, x.priceChange, +x.quoteVolume, true));
+    autoItems[id] = ok.map(x => ({ market: m, symbol: x.symbol }));
+    LS.set('wlAll:' + m, { t: now, list: ok.map(x => x.symbol) });
+    if (wlCur === id) { renderWatchlist(); connectWatchlist(); }
+  } catch { if (!autoItems[id]) toast('전체 목록을 못 불러왔어요'); }
+}
+const wlBase = w => w.market === 'upbit' ? (w.symbol.split('-')[1] || w.symbol) : w.symbol.replace(/USDT$/, '');
+const wlVolUsd = (w, p) => p && p.qv != null ? (w.market === 'upbit' ? p.qv / 1400 : p.qv) : null; // 정렬용 (원화는 대략 달러로)
+function viewItems() {
+  const l = curList(), s = wlSort[l.id], items = l.items.slice();
+  if (!s || !s.k) return items;
+  const val = w => {
+    if (s.k === 'name') return wlBase(w);
+    const p = wlPrices[w.market + ':' + w.symbol]; if (!p) return null;
+    return s.k === 'chg' ? p.chg : s.k === 'vol' ? wlVolUsd(w, p) : +p.c;
+  };
+  const vals = new Map(items.map(w => [w, val(w)]));
+  return items.sort((a, b) => {
+    const x = vals.get(a), y = vals.get(b);
+    if (x == null || y == null) return (x == null) - (y == null);
+    return (typeof x === 'string' ? x.localeCompare(y) : x - y) * s.d;
+  });
+}
+function wlCells(p, w) {
+  if (!p) return { p: '-', a: '', r: '', v: '', cls: '' };
   const cls = p.chg > 0 ? 'upc' : p.chg < 0 ? 'downc' : '';
   const sg = p.chg > 0 ? '+' : '';
-  return { p: p.c, a: sg + trimNum(p.amt), r: sg + p.chg.toFixed(2) + '%', cls };
+  return { p: p.c, a: p.amt != null ? sg + trimNum(p.amt) : '', r: sg + (+p.chg).toFixed(2) + '%', v: p.qv != null ? (w && w.market === 'upbit' ? fmtKrw(p.qv) : fmtBig(p.qv)) : '', cls };
 }
+let wlRowMap = new Map(), wlOrderSig = '';
 function renderWatchlist() {
   const st = L && activeCell() ? activeCell().st : {};
-  $('#wl').innerHTML = (watchlist.length ? `<div class="wl-head"><span>종목</span><span>현재가</span><span>등락</span><span>등락률</span><span></span></div>` : '') + watchlist.map((w, i) => {
-    const k = w.market + ':' + w.symbol, c = wlCells(wlPrices[k]);
+  const l = curList(), items = viewItems(), s = wlSort[l.id] || {};
+  const mainSet = l.auto ? new Set(watchlist.map(w => w.market + ':' + w.symbol)) : null;
+  $('#wlPick').innerHTML = `${esc(l.name)} <span class="m">${l.items.length}</span> ▾`;
+  $('#wlAdd').style.display = l.auto ? 'none' : '';
+  const hd = (k, t) => `<span data-sort="${k}" class="${s.k === k ? 'on' : ''}">${t}${s.k === k ? (s.d > 0 ? ' ▲' : ' ▼') : ''}</span>`;
+  $('#wl').innerHTML = (items.length ? `<div class="wl-head">${hd('name', '종목')}${hd('price', '현재가')}<span class="a">등락</span>${hd('chg', '등락률')}${hd('vol', '거래대금')}<span></span></div>` : '') + items.map(w => {
+    const k = w.market + ':' + w.symbol, c = wlCells(wlPrices[k], w);
     const cur = w.market === st.market && w.symbol === st.symbol;
-    return `<div class="wl-row ${cur ? 'cur' : ''}" data-i="${i}" data-k="${k}">
-      <span class="sn">${w.market === 'upbit' ? `<span class="s">${esc(w.symbol.split('-')[1] || w.symbol)}</span><span class="m">${w.symbol.startsWith('KRW-') ? '원화' : esc(w.symbol.split('-')[0])}·업비트</span>` : `<span class="s">${w.symbol.replace(/USDT$/, '')}</span>${w.symbol.endsWith('USDT') ? '' : `<span class="m">${esc(w.symbol.replace(/^.*?(USDC|FDUSD|BTC|ETH|BNB)$/, '$1'))}</span>`}${w.market === 'spot' ? '<span class="m">현물</span>' : ''}`}</span>
-      <span class="p">${c.p}</span><span class="a">${c.a}</span><span class="c">${c.r}</span>
-      <button class="x" data-del="${i}" title="삭제">×</button></div>`;
-  }).join('') || `<div style="padding:14px;color:var(--muted)">종목 검색창에서 ☆를 눌러 추가해요</div>`;
+    const btn = l.auto ? `<button class="x st ${mainSet.has(k) ? 'on' : ''}" data-star="${k}" title="관심종목에 추가/빼기">${mainSet.has(k) ? '★' : '☆'}</button>` : `<button class="x" data-del="${k}" title="삭제">×</button>`;
+    return `<div class="wl-row ${cur ? 'cur' : ''}" data-k="${k}">
+      <span class="sn">${w.market === 'upbit' ? `<span class="s">${esc(wlBase(w))}</span><span class="m">${w.symbol.startsWith('KRW-') ? '원화' : esc(w.symbol.split('-')[0])}·업비트</span>` : `<span class="s">${esc(wlBase(w))}</span>${w.symbol.endsWith('USDT') ? '' : `<span class="m">${esc(w.symbol.replace(/^.*?(USDC|FDUSD|BTC|ETH|BNB)$/, '$1'))}</span>`}${w.market === 'spot' && !l.auto ? '<span class="m">현물</span>' : ''}`}</span>
+      <span class="p">${c.p}</span><span class="a">${c.a}</span><span class="c">${c.r}</span><span class="v">${c.v}</span>${btn}</div>`;
+  }).join('') || `<div style="padding:14px;color:var(--muted)">${l.auto ? '불러오는 중…' : '종목 검색창에서 ☆를 누르거나, 위 ＋ 추가로 넣어요'}</div>`;
+  wlRowMap = new Map([...$('#wl').querySelectorAll('.wl-row')].map(r => [r.dataset.k, r]));
+  wlOrderSig = items.map(w => w.symbol).join(',');
 }
 // 가격이 바뀐 줄만 고치고, 오르면 초록·내리면 빨강으로 깜빡임
 function updateWl(k, prev) {
-  const row = $('#wl').querySelector(`[data-k="${k}"]`); if (!row) return;
-  const p = wlPrices[k], c = wlCells(p);
+  const row = wlRowMap.get(k); if (!row || !row.isConnected) return;
+  const p = wlPrices[k], c = wlCells(p, { market: k.split(':')[0] });
   const els = [['.p', c.p], ['.a', c.a], ['.c', c.r]].map(([sel, txt]) => { const e = row.querySelector(sel); e.textContent = txt; return e; });
+  row.querySelector('.v').textContent = c.v;
   if (prev != null && +p.c !== +prev) {
     const cls = +p.c > +prev ? 'fl-up' : 'fl-dn';
     els.forEach(e => { e.classList.remove('fl-up', 'fl-dn'); void e.offsetWidth; e.classList.add(cls); });
   }
 }
-function setWlPrice(k, c, open, chg, amt) {
-  const prev = wlPrices[k] ? wlPrices[k].c : null;
-  wlPrices[k] = { c: trimNum(c), chg, amt: amt != null ? amt : c - open, t: Date.now() };
-  if (!$('#wl').querySelector(`[data-k="${k}"]`)) return;
-  updateWl(k, prev);
+function setWlPrice(k, c, open, chg, amt, qv, quiet) {
+  const old = wlPrices[k], prev = old ? old.c : null;
+  wlPrices[k] = { c: trimNum(c), chg: +chg, amt: amt != null ? +amt : open != null ? c - open : null, qv: qv != null ? +qv : old ? old.qv : null, t: Date.now() };
+  if (!quiet) updateWl(k, prev);
 }
+// 실시간 시세: 종목이 많으면 거래소 전체 묶음 스트림 하나로
 function connectWatchlist() {
-  wlSockets.forEach(s => s.close()); wlSockets = [];
   if (MOCK) return;
-  for (const market of ['futures', 'spot']) {
-    const syms = watchlist.filter(w => w.market === market).map(w => w.symbol.toLowerCase() + '@miniTicker');
-    if (!syms.length) continue;
-    wlSockets.push(openWS(`${MARKETS[market].ws}/stream?streams=${syms.join('/')}`, m => {
-      const d = m.data; if (!d) return;
+  const items = curList().items;
+  const fut = items.filter(w => w.market === 'futures').map(w => w.symbol), spot = items.filter(w => w.market === 'spot').map(w => w.symbol);
+  const up = items.filter(w => w.market === 'upbit').map(w => w.symbol);
+  const sig = [fut.length > 40 ? 'F*' : fut.join(','), spot.length > 40 ? 'S*' : spot.join(','), up.join(',')].join('|');
+  if (sig === wlSockSig) return;
+  wlSockSig = sig; wlSockets.forEach(s => s.close()); wlSockets = [];
+  const onMini = market => m => {
+    const arr = Array.isArray(m) ? m : m && m.data ? (Array.isArray(m.data) ? m.data : [m.data]) : [];
+    for (const d of arr) {
+      if (!d || !d.s) continue;
       const pp = decimalsOf(d.c);
-      setWlPrice(market + ':' + d.s, d.c, +d.o, (d.c - d.o) / d.o * 100, +(d.c - d.o).toFixed(pp));
-    }));
-  }
-  const up = watchlist.filter(w => w.market === 'upbit').map(w => w.symbol);
+      setWlPrice(market + ':' + d.s, d.c, +d.o, (d.c - d.o) / d.o * 100, +(d.c - d.o).toFixed(pp), +d.q);
+    }
+  };
+  [['futures', fut], ['spot', spot]].forEach(([market, syms]) => {
+    if (!syms.length) return;
+    const url = syms.length > 40 ? `${MARKETS[market].ws}/ws/!miniTicker@arr` : `${MARKETS[market].ws}/stream?streams=${syms.map(s => s.toLowerCase() + '@miniTicker').join('/')}`;
+    wlSockets.push(openWS(url, onMini(market)));
+  });
   if (up.length) wlSockets.push(openWS(MARKETS.upbit.ws, d => {
     if (d.type !== 'ticker') return;
-    setWlPrice('upbit:' + d.code, d.trade_price, +d.prev_closing_price, d.signed_change_rate * 100, d.signed_change_price);
+    setWlPrice('upbit:' + d.code, d.trade_price, +d.prev_closing_price, d.signed_change_rate * 100, d.signed_change_price, +d.acc_trade_price_24h);
   }, null, [{ ticket: 'wl' + Date.now() }, { type: 'ticker', codes: up }]));
 }
-// 실시간 연결이 안 들어오는 종목은 5초마다 직접 조회해서 채움
-if (MOCK) setInterval(() => watchlist.forEach((w, i) => { const base = 60000 / (i + 1), c = (base * (1 + Math.sin(Date.now() / 7000 + i) * 0.01)).toFixed(2); setWlPrice(w.market + ':' + w.symbol, c, base, (c - base) / base * 100, +(c - base).toFixed(2)); }), 1000);
+if (MOCK) setInterval(() => curList().items.forEach((w, i) => { const base = 60000 / (i + 1), c = (base * (1 + Math.sin(Date.now() / 7000 + i) * 0.01)).toFixed(2); setWlPrice(w.market + ':' + w.symbol, c, base, (c - base) / base * 100, +(c - base).toFixed(2), 1e9 / (i + 1) * (1 + Math.sin(i))); }), 1000);
+// 실시간이 안 들어오는 종목은 5초마다 직접 조회 (많으면 한 번에 전체 조회)
 async function pollWatchlist() {
-  if (MOCK || document.hidden || !L || !L.wlOpen) return;
+  if (MOCK || document.hidden || !L || (!L.wlOpen && !isMobile())) return;
   const now = Date.now();
-  for (const w of watchlist) {
-    if (w.market === 'upbit') continue;
-    const k = w.market + ':' + w.symbol, p = wlPrices[k];
-    if (p && now - p.t < 8000) continue;
+  for (const market of ['futures', 'spot']) {
+    const stale = curList().items.filter(w => w.market === market && !(wlPrices[w.market + ':' + w.symbol] && now - wlPrices[w.market + ':' + w.symbol].t < 8000));
+    if (!stale.length) continue;
     try {
-      const x = await (await fetch(`${MARKETS[w.market].rest}/ticker/24hr?symbol=${w.symbol}`)).json();
-      if (x && x.lastPrice) { setWlPrice(k, x.lastPrice, +x.openPrice, +x.priceChangePercent, x.priceChange); wlPrices[k].t = now - 3000; }
+      const list = stale.length > 5 ? await (await fetch(`${MARKETS[market].rest}/ticker/24hr`)).json()
+        : await Promise.all(stale.map(async w => (await fetch(`${MARKETS[market].rest}/ticker/24hr?symbol=${w.symbol}`)).json()));
+      const want = new Set(stale.map(w => w.symbol));
+      for (const x of list) if (x && x.lastPrice && want.has(x.symbol)) { const k = market + ':' + x.symbol; setWlPrice(k, x.lastPrice, +x.openPrice, +x.priceChangePercent, x.priceChange, +x.quoteVolume); wlPrices[k].t = now - 3000; }
     } catch {}
   }
 }
 setInterval(pollWatchlist, 5000);
 setTimeout(pollWatchlist, 2500);
-function toggleWatch(market, symbol) {
-  const i = watchlist.findIndex(w => w.market === market && w.symbol === symbol);
-  if (i >= 0) watchlist.splice(i, 1); else watchlist.push({ market, symbol });
-  LS.set('watchlist', watchlist); renderWatchlist(); connectWatchlist();
+// 등락률·거래대금 정렬 중이면 3초마다 순서 다시 맞추기
+setInterval(() => {
+  const s = wlSort[curList().id];
+  if (!s || !s.k || s.k === 'name' || document.hidden || $('#right').classList.contains('hide') || rTab !== 'wl') return;
+  if (viewItems().map(w => w.symbol).join(',') !== wlOrderSig) renderWatchlist();
+}, 3000);
+function toggleWatch(market, symbol, list = editList()) {
+  const i = list.items.findIndex(w => w.market === market && w.symbol === symbol);
+  if (i >= 0) list.items.splice(i, 1); else list.items.push({ market, symbol });
+  saveList(list); renderWatchlist(); connectWatchlist();
+  return i < 0;
 }
 let wlRaf = 0;
 function scheduleWlRender() { if (!wlRaf) wlRaf = requestAnimationFrame(() => { wlRaf = 0; renderWatchlist(); }); }
 $('#wl').addEventListener('click', e => {
+  const hs = e.target.closest('[data-sort]');
+  if (hs) { // 같은 칸을 누를 때마다: 정렬 → 반대로 → 정렬 해제
+    const id = curList().id, k = hs.dataset.sort, s = wlSort[id] || {}, def = k === 'name' ? 1 : -1;
+    wlSort[id] = s.k !== k ? { k, d: def } : s.d === def ? { k, d: -def } : {};
+    LS.set('wlSort', wlSort); renderWatchlist(); return;
+  }
+  const star = e.target.closest('[data-star]');
+  if (star) { e.stopPropagation(); const [m, s] = star.dataset.star.split(':'); const added = toggleWatch(m, s, listById('main')); toast(added ? '관심종목에 추가 ★' : '관심종목에서 뺐어요'); return; }
   const del = e.target.closest('[data-del]');
-  if (del) { e.stopPropagation(); watchlist.splice(+del.dataset.del, 1); LS.set('watchlist', watchlist); renderWatchlist(); connectWatchlist(); return; }
-  const r = e.target.closest('[data-i]'); if (!r) return;
-  const w = watchlist[+r.dataset.i];
-  changeSymbol(w.market, w.symbol);
+  if (del) { e.stopPropagation(); const [m, s] = del.dataset.del.split(':'); toggleWatch(m, s, curList()); return; }
+  const r = e.target.closest('[data-k]'); if (!r) return;
+  const [m, s] = r.dataset.k.split(':');
+  changeSymbol(m, s);
 });
 $('#wlAdd').onclick = () => {
-  const st = activeCell().st;
-  if (watchlist.some(w => w.market === st.market && w.symbol === st.symbol)) return toast('이미 있어요');
-  toggleWatch(st.market, st.symbol);
+  const st = activeCell().st, l = editList();
+  if (l.items.some(w => w.market === st.market && w.symbol === st.symbol)) return toast('이미 있어요');
+  toggleWatch(st.market, st.symbol, l);
 };
+// 목록 고르기 · 만들기 · 이름 바꾸기 · 삭제
+function renderWlMenu() {
+  const row = (id, name, n) => `<div class="row ${id === wlCur ? 'cur' : ''}" data-wl="${id}"><span>${esc(name)}</span><span class="m">${n}</span></div>`;
+  const cur = curList();
+  $('#wlMenu').innerHTML = `<div class="t">내 목록</div>${row('main', '관심종목', watchlist.length)}${wlLists.map(l => row(l.id, l.name, l.items.length)).join('')}
+    <div class="t">자동 목록</div>${Object.entries(AUTO_LISTS).map(([id, a]) => row(id, a.name, (autoItems[id] || []).length || '')).join('')}
+    <div class="hr"></div><div class="row" data-wla="new">＋ 새 목록 만들기</div>
+    ${cur.editable && cur.id !== 'main' ? `<div class="row" data-wla="rename">✎ 이름 바꾸기</div><div class="row" data-wla="del" style="color:var(--down)">🗑 이 목록 삭제</div>` : ''}
+    ${cur.auto ? `<div class="row" data-wla="reload">↻ 종목 목록 새로 받기</div>` : ''}`;
+}
+$('#wlPick').onclick = e => { e.stopPropagation(); toggleMenu($('#wlMenu'), e.currentTarget, renderWlMenu); };
+$('#wlMenu').addEventListener('click', e => {
+  const r = e.target.closest('[data-wl]');
+  if (r) { closeMenus(); setWlCur(r.dataset.wl); return; }
+  const a = e.target.closest('[data-wla]')?.dataset.wla; if (!a) return;
+  closeMenus();
+  const cur = curList();
+  if (a === 'new') { const name = (prompt('새 목록 이름', '목록 ' + (wlLists.length + 2)) || '').trim(); if (!name) return; const id = 'w' + Date.now().toString(36); wlLists.push({ id, name, items: [] }); LS.set('watchlists', wlLists); setWlCur(id); }
+  else if (a === 'rename') { const name = (prompt('목록 이름', cur.name) || '').trim(); if (!name) return; wlLists.find(x => x.id === cur.id).name = name; LS.set('watchlists', wlLists); renderWatchlist(); }
+  else if (a === 'del') { if (!confirm(`"${cur.name}" 목록을 지울까요?`)) return; wlLists = wlLists.filter(x => x.id !== cur.id); LS.set('watchlists', wlLists); setWlCur('main'); }
+  else if (a === 'reload') loadAutoList(cur.id, true);
+});
+if (AUTO_LISTS[wlCur]) loadAutoList(wlCur);
 $('#btnWl').onclick = () => { if (L.wlOpen && rTab === 'wl') L.wlOpen = false; else { L.wlOpen = true; setRTab('wl'); } saveLayout(); applyWl(); };
 function applyWl() { $('#right').classList.toggle('hide', isMobile() ? mView !== 'watch' : !L.wlOpen); applyRTab(); setTimeout(() => cells.forEach(c => c.chart.resize()), 0); }
 
@@ -2671,7 +2784,7 @@ const Sync = (() => {
   // 동기화 규칙: ① 항상 먼저 받아오고 그다음 올림 ② 시계 대신 버전 번호(v)로 판단
   // ③ 저장 항목(관심종목·레이아웃·종목별 작도·도구 스타일…)마다 따로 비교해서 바뀐 것만 반영
   // ④ 같은 항목을 양쪽에서 바꿨으면 나중에 바꾼 쪽 우선
-  const SYNC_KEY = /^(layouts|layout:|draw:|watchlist|toolStyle:|groupCur|alerts$)/; // curLayout은 기기마다 따로
+  const SYNC_KEY = /^(layouts|layout:|draw:|watchlist|wlSort$|toolStyle:|groupCur|alerts$)/; // curLayout은 기기마다 따로
   const FILE = 'my-chart-sync.json', DESC = 'my-chart sync (내 차트 동기화 데이터)';
   const API = 'https://api.github.com';
   let busy = false, timer = null, timer2 = null, started = false, again = false;
@@ -2709,7 +2822,11 @@ const Sync = (() => {
   function applyLocal(changes) {
     const keys = Object.keys(changes); if (!keys.length) return;
     keys.forEach(k => changes[k] == null ? localStorage.removeItem(k) : localStorage.setItem(k, changes[k]));
-    if (keys.includes('watchlist')) { watchlist = LS.get('watchlist', []); renderWatchlist(); connectWatchlist(); }
+    if (keys.some(k => k === 'watchlist' || k === 'watchlists' || k === 'wlSort')) {
+      watchlist = LS.get('watchlist', []); wlLists = LS.get('watchlists', []); wlSort = LS.get('wlSort', {});
+      if (!listById(wlCur)) wlCur = 'main';
+      renderWatchlist(); connectWatchlist();
+    }
     if (keys.includes('alerts')) { AL.list = LS.get('alerts', []); AL.rt = {}; renderAlerts(); syncFeeds(); cells.forEach(c => c.renderAlertMarks()); }
     if (keys.includes('groupCur')) { Object.keys(groupCur).forEach(k => delete groupCur[k]); Object.assign(groupCur, LS.get('groupCur', {})); renderLeft(); }
     if (keys.includes('layouts') || keys.includes('layout:' + curLayout)) {
@@ -2877,7 +2994,7 @@ function renderMoreSheet() {
     <div class="mrow" data-m="settings">⚙ 차트 설정</div>
     <div class="mrow" data-m="layout">▦ 레이아웃 · <b>${esc(layoutName())}</b></div>
     <div class="mrow" data-m="grid">⊞ 화면 분할 · ${n}칸 ${n > 1 ? '(폰에선 한 칸씩 보여요)' : ''}</div>
-    <div class="mrow" data-m="star">${watchlist.some(w => w.market === activeCell().st.market && w.symbol === activeCell().st.symbol) ? '★ 관심종목에서 빼기' : '☆ 관심종목에 추가'}</div>`;
+    <div class="mrow" data-m="star">${editList().items.some(w => w.market === activeCell().st.market && w.symbol === activeCell().st.symbol) ? '★ 관심종목에서 빼기' : '☆ 관심종목에 추가'}</div>`;
 }
 $('#moreSheet').addEventListener('click', e => {
   const r = e.target.closest('[data-m]'); if (!r) return;
@@ -2909,7 +3026,7 @@ $('#mTf').onclick = e => {
 $('#tfMenu').addEventListener('click', e => { const b = e.target.closest('[data-tf]'); if (b) { changeTf(b.dataset.tf); closeMenus(); } });
 $('#mCell').onclick = () => { setActive((L.active + 1) % cells.length); updateMobileBar(); };
 // 관심종목 화면에서 종목을 고르면 차트로 돌아가기
-$('#wl').addEventListener('click', e => { if (isMobile() && e.target.closest('[data-i]') && !e.target.closest('[data-del]')) setView('chart'); });
+$('#wl').addEventListener('click', e => { if (isMobile() && e.target.closest('.wl-row[data-k]') && !e.target.closest('[data-del],[data-star]')) setView('chart'); });
 // 폰에서 그리는 중에는 위에 안내 + 취소 버튼
 let drawHintOn = false;
 function drawHint(name) {
