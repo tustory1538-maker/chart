@@ -24,14 +24,18 @@ const TFS = {
   '1M':[{type:'month',span:1},2592e6]
 };
 const TF_SHOW = Object.keys(TFS);
-const MAIN_INDS = ['MA','EMA','SMA','BOLL','SAR','BBI','NWE','WICK','CM'];
+const MAIN_INDS = ['MA','EMA','SMA','BOLL','SAR','BBI','NWE','WICK','CM','BGM'];
 const SUB_INDS = ['VOL','RSI','STOCH','MACD','KDJ','CCI','OBV','DMI','WR','ROC','MTM','TRIX','BIAS'];
-const IND_NAMES = { MA:'이동평균', EMA:'지수이동평균', SMA:'평활이동평균', BOLL:'볼린저밴드', SAR:'파라볼릭 SAR', BBI:'BBI', NWE:'나다라야-왓슨 엔벨로프', WICK:'꼬리받기 백테스트 (RSI·CCI 지정가)', CM:'캔들매매법 (기준선·깊이·구간·캔들군 신호)', VOL:'거래량', RSI:'RSI', STOCH:'스토캐스틱 (슬로우)', MACD:'MACD', KDJ:'KDJ', CCI:'CCI', OBV:'OBV', DMI:'DMI', WR:'윌리엄스 %R', ROC:'ROC', MTM:'모멘텀', TRIX:'TRIX', BIAS:'이격도' };
+const IND_NAMES = { MA:'이동평균', EMA:'지수이동평균', SMA:'평활이동평균', BOLL:'볼린저밴드', SAR:'파라볼릭 SAR', BBI:'BBI', NWE:'나다라야-왓슨 엔벨로프', WICK:'꼬리받기 백테스트 (RSI·CCI 지정가)', CM:'캔들매매법 (기준선·깊이·구간·캔들군 신호)', BGM:'변곡매매 지표 Pro', VOL:'거래량', RSI:'RSI', STOCH:'스토캐스틱 (슬로우)', MACD:'MACD', KDJ:'KDJ', CCI:'CCI', OBV:'OBV', DMI:'DMI', WR:'윌리엄스 %R', ROC:'ROC', MTM:'모멘텀', TRIX:'TRIX', BIAS:'이격도' };
 const VAR_PARAMS = ['MA','EMA','SMA','RSI','WR','BIAS'];
-const PARAM_NAMES = { CM: ['적깊 비율 (파동 높이 대비)', '손익비', '최대 보유 봉 수', '최대 손절 %', '방향 (1=양쪽, 2=매수, 3=매도)', '위치 필터 (1=켬, 0=끔)', '무효 신호 표시 (1=켬, 0=끔)'], WICK: ['RSI 기준(롱≤, 숏≥100-값)', 'CCI 기준(±)', '지정가 간격 %', '대기 봉 수', '손절 ATR 배수', '손익비', '최대 보유 봉 수', '24h 거래대금 하한(백만)', '방향 (1=양쪽, 2=롱, 3=숏)'], NWE: ['대역폭', '배수', '리페인트 (1=켬, 0=끔)'], STOCH: ['%K 기간', '%K 스무딩', '%D 기간'], BOLL: ['기간', '표준편차'], MACD: ['단기', '장기', '시그널'], KDJ: ['기간', 'K', 'D'] };
+const PARAM_NAMES = { BGM: ['신호 판단용 하이킨아시', '청산맵 민감도 1', '청산맵 민감도 2'], CM: ['적깊 비율 (파동 높이 대비)', '손익비', '최대 보유 봉 수', '최대 손절 %', '방향 (1=양쪽, 2=매수, 3=매도)', '위치 필터 (1=켬, 0=끔)', '무효 신호 표시 (1=켬, 0=끔)'], WICK: ['RSI 기준(롱≤, 숏≥100-값)', 'CCI 기준(±)', '지정가 간격 %', '대기 봉 수', '손절 ATR 배수', '손익비', '최대 보유 봉 수', '24h 거래대금 하한(백만)', '방향 (1=양쪽, 2=롱, 3=숏)'], NWE: ['대역폭', '배수', '리페인트'], STOCH: ['%K 기간', '%K 스무딩', '%D 기간'], BOLL: ['기간', '표준편차'], MACD: ['단기', '장기', '시그널'], KDJ: ['기간', 'K', 'D'] };
 // 오실레이터 기준선 기본값 (상단·중단·하단)
 // 지표별 기본 선 색 (트뷰 원본과 같게)
-const IND_LINE_DEF = { NWE: [{ color: '#089981', size: 1 }, { color: '#F23645', size: 1 }] };
+const IND_LINE_DEF = {
+  NWE: [{ color: '#089981', size: 1 }, { color: '#F23645', size: 1 }],
+  BGM: [{ color: '#FFEB3B', size: 1 }, { color: '#FFFFFF', size: 1 }, { color: '#FFFFFF', size: 1 }, { color: '#00B5E2', size: 2 }, { color: '#4DBF56', size: 2 }]
+};
+const PARAM_BOOL = { NWE: [2], BGM: [0, 1, 2] }; // 켬/끔 체크박스로 보여줄 파라미터
 const LEVEL_DEF = { RSI: [70, 50, 30], STOCH: [80, 50, 20], KDJ: [80, 50, 20], CCI: [100, 0, -100], WR: [-20, -50, -80], MACD: [0], ROC: [0], MTM: [0], TRIX: [0], BIAS: [0] };
 const FIXED_RANGE = { RSI: [0, 100], STOCH: [0, 100] };
 const DRAW_GROUP = 'draw';
@@ -312,8 +316,11 @@ registerLocale('ko-KR', { time: '시간 ', open: '시 ', high: '고 ', low: '저
 registerIndicator({
   name: 'NWE', shortName: 'Nadaraya-Watson Envelope', calcParams: [8, 3, 1], series: 'price', precision: 2,
   figures: [{ key: 'upper', title: 'Upper: ', type: 'line' }, { key: 'lower', title: 'Lower: ', type: 'line' }],
-  calc: (list, ind) => {
-    const h = Math.max(0.01, +ind.calcParams[0] || 8), mult = +ind.calcParams[1] || 3, repaint = (ind.calcParams[2] ?? 1) >= 1;
+  calc: (list, ind) => calcNWE(list, ind.calcParams)
+});
+function calcNWE(list, params) {
+  {
+    const h = Math.max(0.01, +params[0] || 8), mult = +params[1] || 3, repaint = (params[2] ?? 1) >= 1;
     const n = list.length, W = 500, out = list.map(() => ({}));
     const g = x => Math.exp(-(x * x) / (h * h * 2));
     const src = list.map(k => k.close);
@@ -361,6 +368,102 @@ registerIndicator({
     }
     return out;
   }
+}
+
+// ───────── 변곡매매 지표 Pro (첨부한 파인스크립트 그대로 옮김) ─────────
+// 스위칭 라인·밴드(SMA63 ± 2.4σ), EMA 50/200, 하이킨아시 기준 🚀/💥 신호, 거래량 기반 청산맵 선
+const ta = {
+  sma(src, n) { const out = new Array(src.length).fill(null); let s = 0, cnt = 0;
+    for (let i = 0; i < src.length; i++) { const v = src[i]; if (v == null) { s = 0; cnt = 0; continue; } s += v; cnt++; if (cnt > n) { s -= src[i - n]; cnt = n; } if (cnt === n) out[i] = s / n; } return out; },
+  ema(src, n) { const out = new Array(src.length).fill(null), a = 2 / (n + 1); let e = null, seed = 0, cnt = 0;
+    for (let i = 0; i < src.length; i++) { const v = src[i]; if (v == null) continue;
+      if (e == null) { seed += v; cnt++; if (cnt === n) { e = seed / n; out[i] = e; } } else { e = a * v + (1 - a) * e; out[i] = e; } } return out; },
+  stdev(src, n, mean) { return src.map((_, i) => { const m = mean[i]; if (m == null) return null; let s = 0; for (let j = i - n + 1; j <= i; j++) s += (src[j] - m) ** 2; return Math.sqrt(s / n); }); },
+  highest(src, n) { return src.map((_, i) => { if (i < n - 1) return null; let m = -Infinity; for (let j = i - n + 1; j <= i; j++) m = Math.max(m, src[j]); return m; }); },
+  lowest(src, n) { return src.map((_, i) => { if (i < n - 1) return null; let m = Infinity; for (let j = i - n + 1; j <= i; j++) m = Math.min(m, src[j]); return m; }); }
+};
+const BGM_SINCE = Date.UTC(2023, 0, 1);
+function calcBGM(list, params) {
+  const useHA = (params[0] ?? 1) >= 1, show50 = (params[1] ?? 1) >= 1, show100 = (params[2] ?? 0) >= 1;
+  const n = list.length, out = list.map(() => ({}));
+  const C = list.map(k => k.close), H = list.map(k => k.high), Lo = list.map(k => k.low), V = list.map(k => k.volume || 0);
+  // 하이킨아시 (신호 판단용)
+  const haC = list.map(k => (k.open + k.high + k.low + k.close) / 4), haO = new Array(n);
+  for (let i = 0; i < n; i++) haO[i] = i === 0 ? (list[0].open + list[0].close) / 2 : (haO[i - 1] + haC[i - 1]) / 2;
+  // 스위칭 라인 & 밴드 (항상 일반 가격)
+  const LEN = 63, MULT = 2.4;
+  const basis = ta.sma(C, LEN), dev = ta.stdev(C, LEN, basis);
+  const e50 = ta.ema(C, 50), e200 = ta.ema(C, 200);
+  let sw = null, lock = false;
+  for (let i = 0; i < n; i++) {
+    const r = out[i], b = basis[i];
+    const up = b != null ? b + MULT * dev[i] : null, dn = b != null ? b - MULT * dev[i] : null;
+    const hitH = up != null && H[i] >= up, hitL = dn != null && Lo[i] <= dn;
+    const prev = sw;
+    if (i > 0) sw = hitH ? H[i - 1] : hitL ? Lo[i - 1] : sw;
+    if (sw != null) r.sw = sw;
+    if (up != null) { r.upper = up; r.lower = dn; }
+    if (e50[i] != null) r.e50 = e50[i];
+    if (e200[i] != null) r.e200 = e200[i];
+    if (prev != null && sw != null && sw !== prev) lock = false;
+    const flat = prev != null && sw === prev;
+    const tc = useHA ? haC[i] : C[i], to = useHA ? haO[i] : list[i].open;
+    const S = flat && b != null && sw > b && tc < sw && tc < to && !lock;
+    const Lg = flat && b != null && sw < b && tc > sw && tc > to && !lock;
+    if (S || Lg) lock = true;
+    // 얼러트 조건
+    r.c = {
+      long: Lg, short: S,
+      ema50: e50[i] != null && H[i] >= e50[i] && Lo[i] <= e50[i],
+      ema200: e200[i] != null && H[i] >= e200[i] && Lo[i] <= e200[i],
+      bandUp: up != null && H[i] >= up, bandDn: dn != null && Lo[i] <= dn
+    };
+    r.c.band = r.c.bandUp || r.c.bandDn;
+  }
+  // 청산맵: 거래량이 평소보다 클 때 생긴 피벗 고점/저점 위아래에 선을 긋고, 가격이 뚫을 때까지 연장
+  const liq = [];
+  if (n > 2 && (show50 || show100)) {
+    const dwm = list[1].timestamp - list[0].timestamp >= 864e5 - 1, PL = dwm ? 2 : 3;
+    const hv = ta.highest(V, 40), lv = ta.lowest(V, 40), avg = hv.map((h, i) => h == null ? null : (h + lv[i]) / 2);
+    const avgMean = ta.sma(avg, 50);
+    const isPivL = c => { if (c - PL < 0 || c + PL >= n) return false; for (let j = 1; j <= PL; j++) { if (!(Lo[c - j] > Lo[c]) || !(Lo[c + j] >= Lo[c])) return false; } return true; };
+    const isPivH = c => { if (c - PL < 0 || c + PL >= n) return false; for (let j = 1; j <= PL; j++) { if (!(H[c - j] < H[c]) || !(H[c + j] <= H[c])) return false; } return true; };
+    const arrs = [];
+    if (show50) arrs.push({ lev: 50, risk: 0.02, a: 0.4, ratio: 1.1, lines: [], live: [] });
+    if (show100) arrs.push({ lev: 100, risk: 0.01, a: 0.5, ratio: 1.2, lines: [], live: [] });
+    for (let i = 0; i < n; i++) {
+      const c = i - PL, ok = list[i].timestamp >= BGM_SINCE;
+      for (const A of arrs) {
+        if (ok) {
+          const trig = avg[i] != null && avgMean[i] != null && avg[i] >= A.ratio * avgMean[i];
+          if (trig && isPivL(c)) { const l = { x1: c, x2: i, y: Lo[c] / (1 + A.risk), dir: 'dn', a: A.a }; if (A.lines.length === 500) A.lines.shift().dead = true; A.lines.push(l); A.live.push(l); }
+          if (trig && isPivH(c)) { const l = { x1: c, x2: i, y: H[c] * (1 + A.risk), dir: 'up', a: A.a }; if (A.lines.length === 500) A.lines.shift().dead = true; A.lines.push(l); A.live.push(l); }
+          // 연장: 바로 앞 봉까지 이어진 선은 이번 봉이 그 가격을 관통하지 않으면 한 칸 더
+          A.live = A.live.filter(l => {
+            if (l.dead) return false;
+            if (l.x2 === i) return true;
+            if (l.x2 === i - 1 && !(H[i] > l.y && Lo[i] < l.y)) { l.x2 = i; return true; }
+            return false;
+          });
+        }
+      }
+    }
+    arrs.forEach(A => liq.push(...A.lines));
+  }
+  out.liq = liq;
+  return out;
+}
+const BGM_CONDS = [
+  ['long', '🚀 롱 시그널'], ['short', '💥 숏 시그널'], ['ema50', 'EMA 50 터치'], ['ema200', 'EMA 200 터치'],
+  ['bandUp', '밴드 상단 터치'], ['bandDn', '밴드 하단 터치'], ['band', '밴드 상/하단 터치'], ['newBar', '캔들 갱신 (봉 마감마다)']
+];
+registerIndicator({
+  name: 'BGM', shortName: '변곡매매 지표 Pro', calcParams: [1, 1, 0], series: 'price', precision: 2,
+  figures: [
+    { key: 'sw', title: '스위칭: ', type: 'line' }, { key: 'upper', title: '상단: ', type: 'line' }, { key: 'lower', title: '하단: ', type: 'line' },
+    { key: 'e50', title: 'EMA50: ', type: 'line' }, { key: 'e200', title: 'EMA200: ', type: 'line' }
+  ],
+  calc: (list, ind) => { const r = calcBGM(list, ind.calcParams); ind._liq = r.liq; return r; }
 });
 
 // 꼬리받기 백테스트: RSI·CCI 과매도(과매수) 신호 → 신호 봉 저가(고가) ± n% 지정가 → ATR 손절, 손익비 익절, 시간 청산
@@ -517,6 +620,24 @@ function fmtCountdown(ms) {
   return `${p(m)}:${p(s)}`;
 }
 
+// ───────── 작도 되돌리기 (Ctrl+Z / Ctrl+Y) ─────────
+const drawUid = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+let lastOvRC = 0;
+const undoStack = [], redoStack = [];
+function pushUndo(key, before, after) {
+  const top = undoStack[undoStack.length - 1], now = Date.now();
+  if (top && top.key === key && now - top.t < 700) { top.after = after; top.t = now; } // 색 슬라이더처럼 연달아 바뀌면 한 번으로
+  else { undoStack.push({ key, before, after, t: now }); if (undoStack.length > 100) undoStack.shift(); }
+  redoStack.length = 0;
+}
+function applyDrawState(key, val) {
+  if (val == null) localStorage.removeItem(key); else localStorage.setItem(key, val);
+  hideDrawBar();
+  cells.forEach(c => { if (c.drawKey() === key) c.restoreDrawings(); });
+}
+function undoDraw() { const x = undoStack.pop(); if (!x) return toast('되돌릴 작도가 없어요'); redoStack.push(x); applyDrawState(x.key, x.before); }
+function redoDraw() { const x = redoStack.pop(); if (!x) return toast('다시 실행할 게 없어요'); undoStack.push({ ...x, t: 0 }); applyDrawState(x.key, x.after); }
+
 // ───────── 리플레이 (모든 분할 화면이 같은 시점으로 움직임) ─────────
 const R = { on: false, T: 0, id: 0, playing: false, timer: null };
 
@@ -553,14 +674,28 @@ class Cell {
     } });
     this.el.addEventListener('pointerdown', () => setActive(this.idx), true);
     this.el.addEventListener('mouseleave', () => { if (L.sync.crosshair) cells.forEach(o => o !== this && o.chart.executeAction('onCrosshairChange', null)); });
-    this.cv.addEventListener('contextmenu', e => e.preventDefault());
+    this.cv.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const ev = { clientX: e.clientX, clientY: e.clientY };
+      setTimeout(() => { if (Date.now() - lastOvRC > 300 && !R.on) openCtxMenu(this, ev); }, 30);
+    });
     const self = this;
     this.liveLoader = {
       async getBars({ type, timestamp, symbol, period, callback }) {
         const tok = self.tokenOf(symbol, period), tf = tfOfPeriod(period);
         try {
           let data = [];
-          if (type === 'init') data = await fetchKlines(symbol.market, symbol.ticker, tf);
+          if (type === 'init') {
+            data = await fetchKlines(symbol.market, symbol.ticker, tf);
+            // 업비트는 한 번에 200개라, 긴 계산이 필요한 지표(변곡 EMA200·NWE)가 켜져 있으면 400개 더
+            if (symbol.market === 'upbit' && self.st.main.some(n => n === 'BGM' || n === 'NWE')) {
+              for (let k = 0; k < 2 && data.length; k++) {
+                const more = await fetchKlines(symbol.market, symbol.ticker, tf, { endTime: data[0].timestamp - 1 });
+                if (!more.length || tok !== self.token()) break;
+                data = more.filter(x => x.timestamp < data[0].timestamp).concat(data);
+              }
+            }
+          }
           else if (type === 'forward') data = await fetchKlines(symbol.market, symbol.ticker, tf, { endTime: timestamp - 1 });
           if (tok !== self.token()) return;
           callback(data, { forward: data.length >= batchSize(symbol.market, tf), backward: false });
@@ -632,6 +767,7 @@ class Cell {
   }
   afterInit(data) {
     this.restoreDrawings();
+    this.renderAlertMarks();
     if (data && data.length) this.onBar(data[data.length - 1]);
   }
   start() {
@@ -651,7 +787,7 @@ class Cell {
     this.pp = info.pp;
     this.removeDrawings();
     this.open24 = null;
-    if (st.main.includes('NWE')) this.refreshIndicator('NWE'); // 가격 소수점 자릿수 맞추기
+    ['NWE', 'BGM'].forEach(n => st.main.includes(n) && this.refreshIndicator(n)); // 가격 소수점 자릿수 맞추기
     this.chart.setStyles({ candle: { tooltip: { title: { template: this.titleTpl() } } } });
     this.chart.setSymbol({ ticker: st.symbol, market: st.market, pricePrecision: info.pp, volumePrecision: info.vp });
     this.fetch24();
@@ -692,7 +828,7 @@ class Cell {
       onDrawEnd: e => { const id = e.overlay.id; setTimeout(() => { this.saveDrawings(); setActiveTool(null); const o = this.chart.getOverlays({ id })[0]; if (o) showDrawBar(this, o); }, 0); },
       onPressedMoveEnd: () => setTimeout(() => this.saveDrawings(), 0),
       onRemoved: e => { if (sel && sel.id === e.overlay.id) hideDrawBar(); if (!this.suppress) setTimeout(() => this.saveDrawings(), 0); },
-      onRightClick: e => { this.chart.removeOverlay({ id: e.overlay.id }); },
+      onRightClick: e => { lastOvRC = Date.now(); this.chart.removeOverlay({ id: e.overlay.id }); },
       onSelected: e => { if (e.overlay.currentStep === -1) showDrawBar(this, e.overlay); else sel = { cell: this, id: e.overlay.id }; },
       onDeselected: e => { if (sel && (!e.overlay || e.overlay.id === sel.id)) hideDrawBar(); }
     };
@@ -701,14 +837,16 @@ class Cell {
     const st = extra.st ? normSt(extra.st) : (NO_STYLE.includes(name) ? null : toolStyle(name));
     return this.chart.createOverlay({
       name, mode: MAGNET[L.magnet], visible: !drawHidden, lock: !!L.lockAll, ...this.drawEvents(),
-      ...(st ? { styles: styleFor(st) } : {}), extendData: { st }, ...extra.opts
+      ...(st ? { styles: styleFor(st) } : {}), extendData: { st, uid: extra.uid || drawUid() }, ...extra.opts
     });
   }
   drawings() { return this.chart.getOverlays({ groupId: DRAW_GROUP }); }
   saveDrawings() {
     const list = this.drawings().filter(o => DRAW_NAMES.includes(o.name) && o.currentStep === -1)
-      .map(o => ({ name: o.name, points: o.points.map(p => ({ timestamp: p.timestamp, value: p.value })), st: o.extendData?.st || null }));
-    LS.set(this.drawKey(), list);
+      .map(o => ({ name: o.name, points: o.points.map(p => ({ timestamp: p.timestamp, value: p.value })), st: o.extendData?.st || null, uid: o.extendData?.uid }));
+    const key = this.drawKey(), before = localStorage.getItem(key), after = JSON.stringify(list);
+    if (before !== after) pushUndo(key, before, after);
+    LS.set(key, list);
     // 같은 종목을 띄운 다른 칸에도 반영
     cells.forEach(c => { if (c !== this && c.drawKey() === this.drawKey()) c.restoreDrawings(); });
   }
@@ -716,7 +854,31 @@ class Cell {
   restoreDrawings() {
     if (sel && sel.cell === this) hideDrawBar();
     this.removeDrawings();
-    for (const d of LS.get(this.drawKey(), [])) this.createDrawing(d.name, { st: d.st, opts: { points: d.points, onDrawEnd: null } });
+    for (const d of LS.get(this.drawKey(), [])) this.createDrawing(d.name, { st: d.st, uid: d.uid, opts: { points: d.points, onDrawEnd: null } });
+  }
+  // 이 종목에 걸린 가격 알림을 차트에 점선으로 (끌어서 가격 수정)
+  renderAlertMarks() {
+    const ch = this.chart; ch.removeOverlay({ groupId: 'alert' });
+    if (R.on) return;
+    const st = this.st, last = this.lastBar || ch.getDataList().slice(-1)[0]; if (!last) return;
+    for (const a of AL.list) {
+      if (!a.on || a.kind !== 'price' || a.market !== st.market || a.symbol !== st.symbol) continue;
+      const t = a.tgt || {}, marks = t.type === 'value' ? [['v', t.v]] : t.type === 'chv' ? [['up', t.up], ['dn', t.dn]] : [];
+      for (const [which, v] of marks) {
+        if (v == null || isNaN(v)) continue;
+        ch.createOverlay({
+          name: 'alertLine', groupId: 'alert', lock: false, points: [{ timestamp: last.timestamp, value: v }],
+          extendData: { aid: a.id, which, text: (a.msg || AL_OPS[a.op]) + (a.tf !== st.tf ? ` (${a.tf})` : '') },
+          styles: { text: { backgroundColor: '#ff9800', borderColor: '#ff9800', color: '#000000' } },
+          onPressedMoveEnd: e => {
+            const al = AL.list.find(x => x.id === a.id), nv = +(+e.overlay.points[0].value).toFixed(this.pp); if (!al) return;
+            if (which === 'v') al.tgt.v = nv; else al.tgt[which] = nv;
+            delete AL.rt[al.id]; alertsChanged(); toast(`알림 가격 → ${fmtPrice(nv, this.pp)}`);
+          },
+          onRightClick: e => { lastOvRC = Date.now(); return true; }
+        });
+      }
+    }
   }
   cancelDrawing() { this.drawings().filter(o => o.currentStep !== -1).forEach(o => this.chart.removeOverlay({ id: o.id })); }
 
@@ -878,6 +1040,31 @@ class Cell {
         ctx.fillStyle = 'rgba(19,23,34,0.75)'; ctx.fillRect(bx, by, w + 16, 22);
         ctx.fillStyle = '#d1d4dc'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + 8, by + 11);
         ctx.restore();
+        return false;
+      };
+    }
+    if (n === 'BGM') {
+      o.precision = this.pp;
+      const self = this;
+      o.draw = ({ ctx, indicator, xAxis, yAxis, bounding }) => {
+        const res = indicator.result || [], vr = self.chart.getVisibleRange(), list = self.chart.getDataList();
+        // 청산맵 선 (숏 청산 빨강 / 롱 청산 파랑, 두께 3)
+        const liq = indicator._liq || res.liq || [];
+        ctx.lineWidth = 3; ctx.setLineDash([]);
+        for (const l of liq) {
+          if (l.x2 < vr.from - 1 || l.x1 > vr.to + 1) continue;
+          const y = Math.round(yAxis.convertToPixel(l.y)) + 0.5; if (y < -2 || y > bounding.height + 2) continue;
+          ctx.strokeStyle = l.dir === 'up' ? `rgba(242,54,69,${l.a})` : `rgba(41,98,255,${l.a})`;
+          ctx.beginPath(); ctx.moveTo(xAxis.convertToPixel(l.x1), y); ctx.lineTo(xAxis.convertToPixel(l.x2), y); ctx.stroke();
+        }
+        // 🚀 롱(봉 아래) / 💥 숏(봉 위)
+        ctx.font = '14px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textAlign = 'center';
+        for (let i = Math.max(0, vr.from - 1); i < Math.min(res.length, vr.to + 1); i++) {
+          const r = res[i], k = list[i]; if (!r || !r.c || !k) continue;
+          const x = xAxis.convertToPixel(i);
+          if (r.c.short) { ctx.textBaseline = 'bottom'; ctx.fillText('💥', x, yAxis.convertToPixel(k.high) - 3); }
+          if (r.c.long) { ctx.textBaseline = 'top'; ctx.fillText('🚀', x, yAxis.convertToPixel(k.low) + 3); }
+        }
         return false;
       };
     }
@@ -1312,7 +1499,7 @@ function selOverlay() { return sel ? sel.cell.chart.getOverlays({ id: sel.id })[
 function editSelected(patch) {
   const o = selOverlay(); if (!o || !o.extendData?.st) return;
   const st = { ...normSt(o.extendData.st), ...patch }, cell = sel.cell, id = o.id;
-  cell.chart.overrideOverlay({ id, styles: styleFor(st), extendData: { st } });
+  cell.chart.overrideOverlay({ id, styles: styleFor(st), extendData: { ...o.extendData, st } });
   LS.set('toolStyle:' + o.name, st);   // 이 도구의 다음 작도에도 같은 스타일
   cell.saveDrawings();
   const o2 = cell.chart.getOverlays({ id })[0]; if (o2) showDrawBar(cell, o2);
@@ -1331,14 +1518,119 @@ $('#dbClone').addEventListener('click', () => {
 function deleteSelected() { if (sel) sel.cell.chart.removeOverlay({ id: sel.id }); hideDrawBar(); }
 $('#dbDel').addEventListener('click', deleteSelected);
 
-const ALT_KEYS = { KeyT: 'segment', KeyH: 'horizontalStraightLine', KeyJ: 'horizontalRayLine', KeyV: 'verticalStraightLine', KeyC: 'crossLine', KeyF: 'fibonacciLine', KeyR: 'rectBox' };
+// ───────── 단축키 (트레이딩뷰와 같게) ─────────
+const ALT_KEYS = { KeyT: 'segment', KeyH: 'horizontalStraightLine', KeyJ: 'horizontalRayLine', KeyV: 'verticalStraightLine', KeyC: 'crossLine', KeyF: 'fibonacciLine' };
+const ALT_SHIFT_KEYS = { KeyR: 'rectBox' };
+const isTyping = e => { const t = (e.target.tagName || '').toLowerCase(); return t === 'input' || t === 'select' || t === 'textarea' || e.target.isContentEditable; };
+const overlayOpen = () => !!document.querySelector('.modal.show') || $('#symPanel').classList.contains('show') || $('#tfInput').classList.contains('show');
+// 관심종목 넘기기: ↓·Space 다음, ↑·Shift+Space 이전, Home/End 처음/끝
+function wlNav(dir) {
+  if (!watchlist.length) return toast('관심종목이 비어 있어요');
+  const st = activeCell().st, cur = watchlist.findIndex(w => w.market === st.market && w.symbol === st.symbol);
+  const i = dir === 'first' ? 0 : dir === 'last' ? watchlist.length - 1 : cur < 0 ? (dir > 0 ? 0 : watchlist.length - 1) : cur + dir;
+  if (i < 0 || i >= watchlist.length || i === cur) return;
+  const w = watchlist[i]; changeSymbol(w.market, w.symbol);
+  const row = $('#wl').querySelector(`[data-i="${i}"]`); if (row) row.scrollIntoView({ block: 'nearest' });
+}
+// 차트 라이브러리의 방향키 동작보다 먼저 가로채기
+window.addEventListener('keydown', e => {
+  if (isTyping(e)) return;
+  const k = e.key, stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+  if (R.on && e.shiftKey && k === 'ArrowRight') { stop(); replayStep(); return; }
+  if (overlayOpen() || e.ctrlKey || e.metaKey || e.altKey) return;
+  if ((k === 'ArrowDown' || k === 'ArrowUp') && !e.shiftKey) { stop(); wlNav(k === 'ArrowDown' ? 1 : -1); return; }
+  if (k === ' ') { stop(); wlNav(e.shiftKey ? -1 : 1); return; }
+  if (k === 'Home' || k === 'End') { stop(); wlNav(k === 'Home' ? 'first' : 'last'); return; }
+  if (k === 'Tab' && cells.length > 1) { stop(); setActive((L.active + (e.shiftKey ? cells.length - 1 : 1)) % cells.length); updateMobileBar(); return; }
+}, true);
+let drawClip = null;
+function resetChartView() {
+  const ch = activeCell().chart;
+  ch.setBarSpace(8); ch.scrollToRealTime();
+  activeCell().applyAxis();
+}
+function snapshot() {
+  const c = activeCell();
+  try {
+    const url = c.chart.getConvertPictureUrl(true, 'png', getComputedStyle(document.body).getPropertyValue('--bg').trim() || '#131722');
+    const a = document.createElement('a'); a.href = url; a.download = `${c.st.symbol}_${c.st.tf}_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.png`; a.click();
+    toast('차트 이미지를 저장했어요');
+  } catch { toast('이미지 저장 실패'); }
+}
+function toggleMaximize() {
+  if (cells.length < 2) return;
+  const g = $('#grid'); g.classList.toggle('max');
+  setTimeout(() => cells.forEach(c => { c.chart.resize(); c.fitPanes(); }), 30);
+}
 document.addEventListener('keydown', e => {
-  const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-  if (e.altKey && ALT_KEYS[e.code]) { e.preventDefault(); startTool(ALT_KEYS[e.code]); return; }
-  if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); deleteSelected(); return; }
-  if (e.key === 'Escape') { cancelDrawing(); endPick(); closeMenus(); hideDrawBar(); document.querySelectorAll('.modal').forEach(m => m.classList.remove('show')); return; }
-  if (/^[a-zA-Z0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && !document.querySelector('.modal.show')) { e.preventDefault(); openSymPanel(e.key.toUpperCase()); }
+  if (isTyping(e)) return;
+  const code = e.code, k = e.key, ctrl = e.ctrlKey || e.metaKey, pd = () => e.preventDefault();
+  if (k === 'Escape') {
+    cancelDrawing(); endPick(); closeMenus(); hideDrawBar(); document.querySelectorAll('.modal').forEach(m => m.classList.remove('show'));
+    if ($('#grid').classList.contains('max')) toggleMaximize();
+    return;
+  }
+  if (overlayOpen()) return;
+  if (ctrl && !e.altKey && code === 'KeyZ') { pd(); e.shiftKey ? redoDraw() : undoDraw(); return; }
+  if (ctrl && !e.altKey && code === 'KeyY') { pd(); redoDraw(); return; }
+  if (ctrl && !e.altKey && code === 'KeyC' && sel) {
+    const o = selOverlay(); if (!o) return; pd();
+    drawClip = { name: o.name, st: o.extendData?.st, points: o.points.map(p => ({ timestamp: p.timestamp, value: p.value })) };
+    toast('작도 복사됨 (Ctrl+V로 붙여넣기)'); return;
+  }
+  if (ctrl && !e.altKey && code === 'KeyV' && drawClip) {
+    pd(); const c = activeCell(), shift = 3 * c.ms;
+    c.createDrawing(drawClip.name, { st: drawClip.st, opts: { points: drawClip.points.map(p => ({ timestamp: p.timestamp + shift, value: p.value })), onDrawEnd: null } });
+    c.saveDrawings(); return;
+  }
+  if (ctrl && e.altKey && code === 'KeyH') { pd(); toggleHide(); return; }
+  if (e.altKey && !ctrl) {
+    if (e.shiftKey && ALT_SHIFT_KEYS[code]) { pd(); startTool(ALT_SHIFT_KEYS[code]); return; }
+    if (!e.shiftKey && ALT_KEYS[code]) { pd(); startTool(ALT_KEYS[code]); return; }
+    if (e.shiftKey) return;
+    const act = {
+      KeyA: () => openAlertModal(),
+      KeyW: () => { const st = activeCell().st; if (watchlist.some(w => w.market === st.market && w.symbol === st.symbol)) toast('이미 관심종목에 있어요'); else { toggleWatch(st.market, st.symbol); toast('관심종목에 추가 ★'); } },
+      KeyR: resetChartView,
+      KeyI: () => setVal('invert', !L.settings.invert),
+      KeyL: () => setVal('scale', L.settings.scale === 'logarithm' ? 'normal' : 'logarithm'),
+      KeyP: () => setVal('scale', L.settings.scale === 'percentage' ? 'normal' : 'percentage'),
+      KeyS: snapshot,
+      Enter: toggleMaximize
+    }[code];
+    if (act) { pd(); act(); }
+    return;
+  }
+  if (ctrl) return;
+  if ((k === 'Delete' || k === 'Backspace') && sel) { pd(); deleteSelected(); return; }
+  if (k === '/') { pd(); openIndModal(); return; }
+  if (/^[0-9]$/.test(k) || k === ',') { pd(); openTfInput(k === ',' ? '' : k); return; }
+  if (/^[a-zA-Z]$/.test(k)) { pd(); openSymPanel(k.toUpperCase()); }
+});
+// 숫자를 누르면 타임프레임 입력 (트뷰처럼): 5 → 5분, 60 → 1시간, 4h, 1d, 1w, 1M
+function parseTf(txt) {
+  const m = String(txt).trim().match(/^(\d+)\s*([smhdwSMHDW]?)$/) || String(txt).trim().match(/^()([DWM])$/i);
+  if (!m) return null;
+  const n = m[1] === '' ? 1 : +m[1], u = m[2];
+  if (!u || u === 'm') { if (n % 1440 === 0) return n / 1440 + 'd'; if (n % 60 === 0) return n / 60 + 'h'; return n + 'm'; }
+  if (u === 'h' || u === 'H') return n + 'h';
+  if (u === 'd' || u === 'D') return n + 'd';
+  if (u === 'w' || u === 'W') return n + 'w';
+  if (u === 'M') return n + 'M';
+  return null;
+}
+function openTfInput(first) {
+  const m = $('#tfInput'), box = $('#tfInputBox');
+  closeMenus(); m.classList.add('show');
+  m.style.left = Math.round(innerWidth / 2 - m.offsetWidth / 2) + 'px'; m.style.top = Math.round(innerHeight * 0.28) + 'px';
+  box.value = first; box.focus();
+}
+$('#tfInput').addEventListener('click', e => e.stopPropagation());
+$('#tfInputBox').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeMenus(); return; }
+  if (e.key !== 'Enter') return;
+  const tf = parseTf(e.target.value); closeMenus();
+  if (tf && TFS[tf]) changeTf(tf); else toast('지원하지 않는 타임프레임이에요 (' + TF_SHOW.join(', ') + ')', 3500);
 });
 
 // ───────── 지표 설정 창 ─────────
@@ -1369,7 +1661,9 @@ function renderIndEdit() {
   const isSub = !MAIN_INDS.includes(n);
   const lv = cell.levelsOf(n);
   box.innerHTML = `<h4>${n} <span class="m">${IND_NAMES[n] || ''}</span></h4>
-    ${params.length ? `<div class="sec">파라미터${pn.length ? ' (' + pn.join(' / ') + ')' : ''}</div><div class="prm">${params.map((p, i) => `<input type="number" min="0.1" step="any" data-pi="${i}" value="${p}" title="${pn[i] || ''}">`).join('')}
+    ${params.length ? `<div class="sec">파라미터${pn.length && !PARAM_BOOL[n] ? ' (' + pn.join(' / ') + ')' : ''}</div><div class="prm">${params.map((p, i) => (PARAM_BOOL[n] || []).includes(i)
+      ? `<label class="pb"><input type="checkbox" data-pi="${i}" ${+p >= 1 ? 'checked' : ''}> ${esc(pn[i] || '')}</label>`
+      : `${PARAM_BOOL[n] && pn[i] ? `<span class="m">${esc(pn[i])}</span>` : ''}<input type="number" min="0" step="any" data-pi="${i}" value="${p}" title="${pn[i] || ''}">`).join('')}
       ${VAR_PARAMS.includes(n) ? `<button id="pAdd" title="기간 추가">＋</button><button id="pDel" title="마지막 기간 삭제">－</button>` : ''}</div>` : ''}
     ${lineFigs.length ? `<div class="sec">선 스타일</div>${lineFigs.map((f, i) => {
       const s = { ...base[i % base.length], ...((IND_LINE_DEF[n] || [])[i] || {}), ...(cur[i] || {}) };
@@ -1410,7 +1704,7 @@ $('#indList').addEventListener('click', e => {
 $('#indEdit').addEventListener('change', e => {
   const cell = activeCell(), n = indSel, t = e.target;
   if (t.dataset.pi != null) {
-    const arr = [...$('#indEdit').querySelectorAll('[data-pi]')].map(x => +x.value).filter(v => v > 0);
+    const arr = [...$('#indEdit').querySelectorAll('[data-pi]')].map(x => x.type === 'checkbox' ? (x.checked ? 1 : 0) : +x.value).filter(v => !isNaN(v) && v >= 0);
     if (arr.length) cell.st.params[n] = arr;
     saveLayout(); cell.refreshIndicator(n); renderIndEdit();
   } else if (t.dataset.lw != null) {
@@ -1590,7 +1884,7 @@ function dataTabHTML() {
     <p class="note">레이아웃·작도·지표·관심종목은 기기마다 따로 저장돼요. 내보낸 파일을 다른 기기에서 가져오면 똑같이 옮겨져요.</p>
     <div class="srow btns"><button id="btnExport">⬇ 내보내기</button><button id="btnImport">⬆ 가져오기</button><input type="file" id="importFile" accept=".json,application/json" hidden></div>`;
 }
-const BACKUP_KEY = /^(layouts|curLayout|layout:|draw:|watchlist|toolStyle:|groupCur)/;
+const BACKUP_KEY = /^(layouts|curLayout|layout:|draw:|watchlist|toolStyle:|groupCur|alerts$)/;
 function bindDataTab() {
   if ($('#syncOn')) $('#syncOn').onclick = async () => {
     const t = $('#syncToken').value.trim(); if (!t) return;
@@ -1829,15 +2123,535 @@ $('#wlAdd').onclick = () => {
   if (watchlist.some(w => w.market === st.market && w.symbol === st.symbol)) return toast('이미 있어요');
   toggleWatch(st.market, st.symbol);
 };
-$('#btnWl').onclick = () => { L.wlOpen = !L.wlOpen; saveLayout(); applyWl(); };
-function applyWl() { $('#right').classList.toggle('hide', isMobile() ? mView !== 'watch' : !L.wlOpen); $('#btnWl').classList.toggle('on', L.wlOpen); setTimeout(() => cells.forEach(c => c.chart.resize()), 0); }
+$('#btnWl').onclick = () => { if (L.wlOpen && rTab === 'wl') L.wlOpen = false; else { L.wlOpen = true; setRTab('wl'); } saveLayout(); applyWl(); };
+function applyWl() { $('#right').classList.toggle('hide', isMobile() ? mView !== 'watch' : !L.wlOpen); applyRTab(); setTimeout(() => cells.forEach(c => c.chart.resize()), 0); }
+
+// ───────── 알림 (앱이 켜져 있는 동안 실시간 감시 → 소리·팝업·시스템 알림) ─────────
+const AL_OPS = {
+  cross: '크로싱', crossUp: '상향 돌파', crossDown: '하향 돌파', gt: '보다 큼', lt: '보다 작음',
+  enterCh: '채널 진입', exitCh: '채널 이탈', inCh: '채널 안', outCh: '채널 밖',
+  moveUp: '상승 (가격)', moveDown: '하락 (가격)', moveUpPct: '상승 %', moveDownPct: '하락 %'
+};
+const LINE_OPS = ['cross', 'crossUp', 'crossDown', 'gt', 'lt'], CH_OPS = ['enterCh', 'exitCh', 'inCh', 'outCh'], MOVE_OPS = ['moveUp', 'moveDown', 'moveUpPct', 'moveDownPct'];
+const AL_FREQ = { once: '한 번만', bar: '봉마다 한 번', close: '봉 마감 시 한 번', min: '1분에 한 번' };
+const IND_CONDS = { BGM: BGM_CONDS, NWE: [['up', '▲ 하단 밴드 이탈'], ['dn', '▼ 상단 밴드 돌파']] };
+const IND_DEF_PARAMS = { MA: [5, 10, 30, 60], EMA: [6, 12, 20], BOLL: [20, 2], NWE: [8, 3, 1], BGM: [1, 1, 0] };
+// 알림 기준으로 쓸 수 있는 지표 선 / 채널
+const LINE_SRC = {
+  MA: p => p.map((v, i) => ({ key: 'ma' + (i + 1), label: 'MA ' + v })),
+  EMA: p => p.map((v, i) => ({ key: 'ema' + (i + 1), label: 'EMA ' + v })),
+  BOLL: () => [{ key: 'up', label: 'BOLL 상단' }, { key: 'mid', label: 'BOLL 중간' }, { key: 'dn', label: 'BOLL 하단' }],
+  NWE: () => [{ key: 'upper', label: 'NWE 상단' }, { key: 'lower', label: 'NWE 하단' }],
+  BGM: () => [{ key: 'sw', label: '변곡 스위칭 라인' }, { key: 'upper', label: '변곡 밴드 상단' }, { key: 'lower', label: '변곡 밴드 하단' }, { key: 'e50', label: 'EMA 50 (변곡)' }, { key: 'e200', label: 'EMA 200 (변곡)' }]
+};
+const CH_SRC = { BOLL: ['up', 'dn', '볼린저밴드'], NWE: ['upper', 'lower', 'NWE 엔벨로프'], BGM: ['upper', 'lower', '변곡 밴드'] };
+const DRAW_LINE = ['segment', 'rayLine', 'straightLine', 'infoLine', 'trendAngle', 'arrowLine', 'horizontalStraightLine', 'horizontalRayLine', 'crossLine'];
+const DRAW_CH = ['parallelChannel', 'rectBox', 'flatTopBottom'];
+
+function calcLines(name, params, list) {
+  const C = list.map(k => k.close);
+  if (name === 'MA' || name === 'EMA') {
+    const arrs = params.map(v => (name === 'MA' ? ta.sma : ta.ema)(C, Math.max(1, Math.round(v))));
+    return list.map((_, i) => { const o = {}; arrs.forEach((a, j) => { o[name.toLowerCase() + (j + 1)] = a[i]; }); return o; });
+  }
+  if (name === 'BOLL') {
+    const n = Math.max(1, Math.round(params[0] || 20)), k = params[1] || 2, mid = ta.sma(C, n), sd = ta.stdev(C, n, mid);
+    return list.map((_, i) => mid[i] == null ? {} : { mid: mid[i], up: mid[i] + k * sd[i], dn: mid[i] - k * sd[i] });
+  }
+  if (name === 'NWE') return calcNWE(list, params);
+  if (name === 'BGM') return calcBGM(list, [params[0] ?? 1, 0, 0]); // 알림 판단엔 청산맵 필요 없음
+  return list.map(() => ({}));
+}
+// 작도의 특정 시각 값
+function lineAt(p0, p1, ts) {
+  if (!p1 || p1.timestamp === p0.timestamp) return p0.value;
+  return p0.value + (p1.value - p0.value) * (ts - p0.timestamp) / (p1.timestamp - p0.timestamp);
+}
+function findDrawing(t) { return (LS.get(t.key, []) || []).find(d => d.uid === t.uid) || null; }
+function drawValue(d, ts) {
+  const p = d.points || [];
+  if (!p.length) return null;
+  if (['horizontalStraightLine', 'horizontalRayLine', 'crossLine'].includes(d.name)) return p[0].value;
+  if (DRAW_LINE.includes(d.name)) return lineAt(p[0], p[1], ts);
+  if (d.name === 'rectBox' && p.length >= 2) return { up: Math.max(p[0].value, p[1].value), dn: Math.min(p[0].value, p[1].value) };
+  if (d.name === 'parallelChannel' && p.length >= 3) { const a = lineAt(p[0], p[1], ts), off = p[2].value - lineAt(p[0], p[1], p[2].timestamp); return { up: Math.max(a, a + off), dn: Math.min(a, a + off) }; }
+  if (d.name === 'flatTopBottom' && p.length >= 3) { const a = lineAt(p[0], p[1], ts); return { up: Math.max(a, p[2].value), dn: Math.min(a, p[2].value) }; }
+  return null;
+}
+
+const AL = { list: LS.get('alerts', []), log: LS.get('alertLog', []), rt: {} };
+if (!Array.isArray(AL.list)) AL.list = [];
+const alertsDevice = () => LS.get('alerts:device', true);
+const alUid = () => 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+function persistAlerts() { LS.set('alerts', AL.list); }
+function alertsChanged() { persistAlerts(); renderAlerts(); syncFeeds(); cells.forEach(c => c.renderAlertMarks()); }
+function fmtA(a, v) { return v == null || isNaN(v) ? '-' : fmtPrice(v, (infoCache[a.market + ':' + a.symbol] || {}).pp ?? 2); }
+function tgtLabel(a) {
+  const t = a.tgt || {};
+  if (t.type === 'value') return fmtA(a, t.v);
+  if (t.type === 'line') return ((LINE_SRC[t.ind] ? LINE_SRC[t.ind](t.params || []) : []).find(x => x.key === t.key) || {}).label || t.ind;
+  if (t.type === 'draw') return (TK.NAMES[t.name] || '작도') + (findDrawing(t) ? '' : ' (지워짐)');
+  if (t.type === 'chv') return `${fmtA(a, t.dn)} ~ ${fmtA(a, t.up)}`;
+  if (t.type === 'chind') return (CH_SRC[t.ind] || [])[2] || t.ind;
+  return '';
+}
+function describeAlert(a) {
+  if (a.kind === 'ind') return `${IND_NAMES[a.ind] || a.ind} · ${((IND_CONDS[a.ind] || []).find(c => c[0] === a.cond) || [])[1] || a.cond}`;
+  if (MOVE_OPS.includes(a.op)) return `가격 ${a.bars}봉 안에 ${AL_OPS[a.op].split(' ')[0]} ${a.op.endsWith('Pct') ? a.amt + '%' : fmtA(a, a.amt)}`;
+  return `가격 ${AL_OPS[a.op]} ${tgtLabel(a)}`;
+}
+const symLabel = a => `${a.symbol} · ${a.tf}${a.market === 'spot' ? ' · 현물' : a.market === 'upbit' ? ' · 업비트' : ''}`;
+
+// ── 데이터 공급 (알림 종목·타임프레임마다 하나) ──
+const Feeds = {};
+const feedKey = a => `${a.market}|${a.symbol}|${a.tf}`;
+let feedSocks = { futures: null, spot: null, upbit: null }, feedSig = {};
+function syncFeeds() {
+  const need = new Set(AL.list.filter(a => a.on).map(feedKey));
+  for (const k of Object.keys(Feeds)) if (!need.has(k)) { Feeds[k].stop && Feeds[k].stop(); delete Feeds[k]; }
+  for (const k of need) if (!Feeds[k]) { const [market, symbol, tf] = k.split('|'); Feeds[k] = { key: k, market, symbol, tf, bars: [], ready: false, closedTs: 0, lastEval: 0 }; loadFeed(Feeds[k]); }
+  connectFeeds();
+}
+async function loadFeed(f) {
+  try {
+    if (!infoCache[f.market + ':' + f.symbol]) symbolInfo(f.market, f.symbol).then(() => renderAlerts()).catch(() => {});
+    let bars = await fetchKlines(f.market, f.symbol, f.tf);
+    if (f.market === 'upbit') { // 업비트는 한 번에 200개라 두 번 더 받아서 EMA200 계산에 충분하게
+      for (let k = 0; k < 2 && bars.length; k++) {
+        const more = await fetchKlines(f.market, f.symbol, f.tf, { endTime: bars[0].timestamp - 1 });
+        if (!more.length) break;
+        bars = more.filter(b => b.timestamp < bars[0].timestamp).concat(bars);
+      }
+    }
+    if (Feeds[f.key] !== f) return;
+    f.bars = bars.slice(-1500); f.ready = true; f.err = '';
+    const last = f.bars[f.bars.length - 1], ms = TFS[f.tf][1];
+    f.closedTs = last ? (closeTimeOf(last.timestamp, f.tf) <= Date.now() ? last.timestamp : (f.bars[f.bars.length - 2] || {}).timestamp || 0) : 0;
+    if (MOCK) {
+      const k = mockK(f.symbol);
+      if (last && closeTimeOf(last.timestamp, f.tf) > Date.now()) last.close = mockPrice(Date.now(), k);
+      const id = setInterval(() => { const ts = Math.floor(Date.now() / ms) * ms; const b = mockBar(ts, ms, k); b.close = mockPrice(Date.now(), k); b.high = Math.max(b.high, b.close); b.low = Math.min(b.low, b.close); feedBar(f, b); }, 1000);
+      f.stop = () => clearInterval(id);
+    }
+    evalFeed(f, 'tick');
+  } catch (e) {
+    f.err = e.message;
+    setTimeout(() => { if (Feeds[f.key] === f) loadFeed(f); }, 30000);
+  }
+}
+function connectFeeds() {
+  if (MOCK) return;
+  const list = Object.values(Feeds);
+  for (const m of ['futures', 'spot']) {
+    const streams = [...new Set(list.filter(f => f.market === m).map(f => f.symbol.toLowerCase() + '@kline_' + f.tf))].sort();
+    const sig = streams.join('/');
+    if (feedSig[m] === sig) continue;
+    feedSig[m] = sig; feedSocks[m] && feedSocks[m].close(); feedSocks[m] = null;
+    if (!streams.length) continue;
+    feedSocks[m] = openWS(`${MARKETS[m].ws}/stream?streams=${sig}`, msg => {
+      const d = msg.data, k = d && d.k; if (!k) return;
+      const f = Feeds[`${m}|${d.s}|${k.i}`]; if (!f || !f.ready) return;
+      feedBar(f, { timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v, turnover: +k.q }, k.x);
+    }, () => list.filter(f => f.market === m).forEach(async f => { // 끊겼다 다시 붙으면 빈 구간 채우기
+      try { (await fetchKlines(m, f.symbol, f.tf, { limit: 200 })).forEach(b => feedBar(f, b, false, true)); } catch {}
+    }));
+  }
+  const codes = [...new Set(list.filter(f => f.market === 'upbit').map(f => f.symbol))].sort(), usig = codes.join(',');
+  if (feedSig.upbit !== usig) {
+    feedSig.upbit = usig; feedSocks.upbit && feedSocks.upbit.close(); feedSocks.upbit = null;
+    if (codes.length) feedSocks.upbit = openWS(MARKETS.upbit.ws, m => {
+      if (m.type !== 'trade') return;
+      const p = +m.trade_price;
+      for (const f of Object.values(Feeds)) {
+        if (f.market !== 'upbit' || f.symbol !== m.code || !f.ready) continue;
+        const t = barStart(m.trade_timestamp, f.tf), last = f.bars[f.bars.length - 1];
+        let b;
+        if (!last || t > last.timestamp) b = { timestamp: t, open: p, high: p, low: p, close: p, volume: +m.trade_volume, turnover: p * m.trade_volume };
+        else if (t === last.timestamp) b = { ...last, high: Math.max(last.high, p), low: Math.min(last.low, p), close: p, volume: last.volume + +m.trade_volume };
+        else continue;
+        feedBar(f, b);
+      }
+    }, null, [{ ticket: 'al' + Date.now() }, { type: 'trade', codes, isOnlyRealtime: true }]);
+  }
+}
+// 새 시세 반영 → 봉이 바뀌었으면 이전 봉 마감 처리 → 실시간 판단
+function feedBar(f, b, closed, quiet) {
+  const bars = f.bars, last = bars[bars.length - 1];
+  if (last && b.timestamp < last.timestamp) {
+    const i = bars.findIndex(x => x.timestamp === b.timestamp); if (i >= 0) bars[i] = b; return;
+  }
+  if (last && b.timestamp === last.timestamp) bars[bars.length - 1] = b;
+  else {
+    if (last && last.timestamp > f.closedTs && !quiet) closeFeedBar(f, last.timestamp);
+    bars.push(b); if (bars.length > 1600) bars.splice(0, bars.length - 1500);
+  }
+  if (quiet) return;
+  if (closed) closeFeedBar(f, b.timestamp);
+  const now = Date.now();
+  if (now - f.lastEval >= 300) evalFeed(f, 'tick');
+}
+function closeFeedBar(f, ts) {
+  if (ts <= f.closedTs) return;
+  f.closedTs = ts;
+  const i = f.bars.findIndex(x => x.timestamp === ts);
+  if (i > 0) evalFeed(f, 'close', i);
+}
+// 1초마다: 거래가 없어서 다음 봉이 안 와도 시간이 지나면 봉 마감으로 처리
+setInterval(() => {
+  const now = Date.now();
+  for (const f of Object.values(Feeds)) {
+    const last = f.bars[f.bars.length - 1];
+    if (f.ready && last && last.timestamp > f.closedTs && closeTimeOf(last.timestamp, f.tf) + 1500 <= now) closeFeedBar(f, last.timestamp);
+  }
+}, 1000);
+
+function evalFeed(f, mode, idx) {
+  if (!f.ready || f.bars.length < 2) return;
+  if (mode === 'tick') f.lastEval = Date.now();
+  const alerts = AL.list.filter(a => a.on && feedKey(a) === f.key);
+  if (!alerts.length) return;
+  const list = mode === 'close' ? f.bars.slice(0, idx + 1) : f.bars, i = list.length - 1;
+  const cache = {};
+  const ind = (name, params) => { const k = name + JSON.stringify(params); return cache[k] || (cache[k] = calcLines(name, params, list)); };
+  let changed = false;
+  for (const a of alerts) {
+    try { if (checkAlert(a, f, mode, list, i, ind)) { fireAlert(a, list[i]); changed = true; } } catch (e) { console.warn('alert', e); }
+  }
+  if (changed) { persistAlerts(); renderAlerts(); if (AL.list.some(a => !a.on && Feeds[feedKey(a)])) syncFeeds(); cells.forEach(c => c.renderAlertMarks()); }
+}
+function tgtAt(a, list, j, ind) {
+  const t = a.tgt || {}, ts = list[j].timestamp;
+  if (t.type === 'value') return t.v;
+  if (t.type === 'chv') return { up: Math.max(t.up, t.dn), dn: Math.min(t.up, t.dn) };
+  if (t.type === 'line') { const v = (ind(t.ind, t.params)[j] || {})[t.key]; return v == null ? null : v; }
+  if (t.type === 'chind') { const r = ind(t.ind, t.params)[j] || {}, [u, d] = CH_SRC[t.ind]; return r[u] == null ? null : { up: r[u], dn: r[d] }; }
+  if (t.type === 'draw') { const d = findDrawing(t); return d ? drawValue(d, ts) : null; }
+  return null;
+}
+const inside = (v, c) => v >= c.dn && v <= c.up;
+function checkAlert(a, f, mode, list, i, ind) {
+  const bar = list[i], rt = AL.rt[a.id] || (AL.rt[a.id] = {});
+  const realtime = a.freq !== 'close';
+  if (a.kind === 'ind') {
+    if (a.cond === 'newBar') return mode === 'close';
+    if (realtime !== (mode === 'tick')) return false;
+    const r = ind(a.ind, a.params || IND_DEF_PARAMS[a.ind])[i] || {};
+    const hit = a.ind === 'NWE' ? (a.cond === 'up' ? r.sig === 1 : r.sig === -1) : !!(r.c && r.c[a.cond]);
+    return hit && allowFire(a, bar);
+  }
+  if (realtime !== (mode === 'tick')) return false;
+  const cv = bar.close;
+  if (MOVE_OPS.includes(a.op)) {
+    const ref = list[i - Math.max(1, a.bars || 1)]; if (!ref) return false;
+    const d = a.op.endsWith('Pct') ? (cv - ref.close) / ref.close * 100 : cv - ref.close;
+    const hit = a.op.startsWith('moveUp') ? d >= a.amt : -d >= a.amt;
+    return hit && allowFire(a, bar);
+  }
+  const ct = tgtAt(a, list, i, ind);
+  let pv, pt;
+  if (mode === 'close') { pv = list[i - 1].close; pt = tgtAt(a, list, i - 1, ind); }
+  else { pv = rt.pv; pt = rt.pt; rt.pv = cv; rt.pt = ct; }
+  if (ct == null) return false;
+  const isCh = typeof ct === 'object';
+  let hit = false;
+  if (!isCh && LINE_OPS.includes(a.op)) {
+    if (a.op === 'gt') hit = cv > ct;
+    else if (a.op === 'lt') hit = cv < ct;
+    else if (pv != null && pt != null && typeof pt !== 'object') {
+      const up = pv < pt && cv >= ct, dn = pv > pt && cv <= ct;
+      hit = a.op === 'cross' ? up || dn : a.op === 'crossUp' ? up : dn;
+    }
+  } else if (isCh && CH_OPS.includes(a.op)) {
+    const nowIn = inside(cv, ct);
+    if (a.op === 'inCh') hit = nowIn;
+    else if (a.op === 'outCh') hit = !nowIn;
+    else if (pv != null && pt && typeof pt === 'object') { const wasIn = inside(pv, pt); hit = a.op === 'enterCh' ? !wasIn && nowIn : wasIn && !nowIn; }
+  }
+  return hit && allowFire(a, bar);
+}
+function allowFire(a, bar) {
+  if (a.freq === 'bar' && a.lfBar === bar.timestamp) return false;
+  if (a.freq === 'min' && Date.now() - (a.lf || 0) < 60000) return false;
+  if (a.freq === 'close' && a.lfBar === bar.timestamp) return false;
+  return true;
+}
+function fireAlert(a, bar) {
+  a.lf = Date.now(); a.lfBar = bar.timestamp; a.n = (a.n || 0) + 1;
+  if (a.freq === 'once') a.on = false;
+  const text = a.msg || describeAlert(a);
+  const price = fmtA(a, bar.close);
+  AL.log.unshift({ t: a.lf, id: a.id, market: a.market, symbol: a.symbol, tf: a.tf, text, price });
+  AL.log = AL.log.slice(0, 60); LS.set('alertLog', AL.log);
+  if (!alertsDevice()) return;
+  if (a.sound !== false) beep();
+  try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch {}
+  showAlertPop(a, text, price);
+  if (document.hidden || !document.hasFocus()) sysNotify(`⏰ ${symLabel(a)}`, `${text}\n가격 ${price}`, a.id + ':' + a.lf);
+}
+
+// ── 소리 · 팝업 · 시스템 알림 ──
+let actx = null;
+const unlockAudio = () => { try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch {} };
+document.addEventListener('pointerdown', unlockAudio, true);
+document.addEventListener('keydown', unlockAudio, true);
+function beep() {
+  try {
+    unlockAudio(); if (!actx) return;
+    const t = actx.currentTime + 0.02;
+    [[880, 0], [1175, 0.17], [1568, 0.34]].forEach(([fq, d]) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.value = fq;
+      g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.35, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.16);
+      o.connect(g); g.connect(actx.destination); o.start(t + d); o.stop(t + d + 0.18);
+    });
+  } catch {}
+}
+async function sysNotify(title, body, tag) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (reg) { await reg.showNotification(title, { body, tag, renotify: true, icon: 'icon-192.png', badge: 'icon-192.png', vibrate: [200, 100, 200] }); return; }
+  } catch {}
+  try { new Notification(title, { body, tag, icon: 'icon-192.png' }); } catch {}
+}
+async function askNotifyPermission() {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'default') { try { await Notification.requestPermission(); } catch {} }
+  renderAlerts();
+  return Notification.permission;
+}
+function showAlertPop(a, text, price) {
+  const box = $('#alPops'), el = document.createElement('div');
+  el.className = 'alpop';
+  el.innerHTML = `<div class="ah"><b>⏰ ${esc(symLabel(a))}</b><button class="ax" title="닫기">✕</button></div>
+    <div>${esc(text)}</div><div class="am">가격 ${esc(price)} · ${fmtTime(Date.now())}</div>
+    <div class="ab"><button class="ago">차트 보기</button></div>`;
+  el.querySelector('.ax').onclick = () => el.remove();
+  el.querySelector('.ago').onclick = () => { el.remove(); goAlertChart(a); };
+  box.prepend(el);
+  while (box.children.length > 5) box.lastChild.remove();
+}
+function goAlertChart(a) {
+  if (isMobile()) setView('chart');
+  const c = activeCell();
+  if (c.st.market !== a.market || c.st.symbol !== a.symbol) changeSymbol(a.market, a.symbol);
+  if (c.st.tf !== a.tf) changeTf(a.tf);
+}
+
+// ── 알림 목록 (오른쪽 패널 '알림' 탭) ──
+let rTab = LS.get('rtab', 'wl');
+function applyRTab() {
+  document.querySelectorAll('#rtabs [data-rt]').forEach(b => b.classList.toggle('on', b.dataset.rt === rTab));
+  $('#wlPane').style.display = rTab === 'wl' ? '' : 'none';
+  $('#alPane').style.display = rTab === 'al' ? '' : 'none';
+  $('#btnAlert').classList.toggle('on', !isMobile() && L && L.wlOpen && rTab === 'al');
+  $('#btnWl').classList.toggle('on', !isMobile() && L && L.wlOpen && rTab === 'wl');
+}
+function setRTab(t) { rTab = t; LS.set('rtab', t); applyRTab(); }
+$('#rtabs').addEventListener('click', e => { const b = e.target.closest('[data-rt]'); if (b) setRTab(b.dataset.rt); });
+function renderAlerts() {
+  const active = AL.list.filter(a => a.on).length;
+  $('#alCnt').textContent = active ? active : '';
+  if (!$('#alPane')) return;
+  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const dev = alertsDevice();
+  const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? '방금' : s < 3600 ? Math.floor(s / 60) + '분 전' : s < 86400 ? Math.floor(s / 3600) + '시간 전' : fmtTime(t); };
+  const rows = AL.list.map(a => {
+    const bad = a.kind !== 'ind' && a.tgt && a.tgt.type === 'draw' && !findDrawing(a.tgt);
+    const f = Feeds[feedKey(a)];
+    return `<div class="al-row ${a.on ? '' : 'off'}" data-aid="${a.id}">
+      <div class="al-main"><div class="al-s">${esc(symLabel(a))}${f && f.err ? ' <span class="downc">· 연결 오류</span>' : ''}</div>
+        <div class="al-d ${bad ? 'downc' : ''}">${esc(a.msg ? a.msg : describeAlert(a))}</div>
+        <div class="al-m">${AL_FREQ[a.freq] || ''}${a.n ? ` · ${a.n}번 울림 · 마지막 ${ago(a.lf)}` : ''}${a.on ? '' : ' · 멈춤'}</div></div>
+      <div class="al-b"><button data-act="toggle" title="${a.on ? '멈추기' : '다시 켜기'}">${a.on ? '⏸' : '▶'}</button><button data-act="edit" title="수정">✎</button><button data-act="del" title="삭제">×</button></div></div>`;
+  }).join('');
+  $('#alPane').innerHTML = `<h3>알림 <span>
+      <button id="alDev" title="이 기기에서 알림 받기">${dev ? '🔔 켜짐' : '🔕 꺼짐'}</button>
+      <button id="alNew" title="새 알림 (Alt+A)">＋ 만들기</button></span></h3>
+    ${perm === 'default' ? `<div class="al-note">앱을 안 보고 있을 때도 알림 창이 뜨게 하려면 <button id="alPerm">시스템 알림 허용</button></div>` : ''}
+    ${perm === 'denied' ? `<div class="al-note">시스템 알림이 차단돼 있어요. 브라우저(앱) 설정 → 알림에서 허용해 주세요. 앱이 켜져 있으면 소리·팝업은 그대로 와요.</div>` : ''}
+    <div id="alList">${rows || `<div class="al-empty">아직 알림이 없어요.<br>가격축 근처를 우클릭하거나 Alt+A, 작도를 고르고 ⏰ 버튼으로 만들 수 있어요.</div>`}</div>
+    <div class="al-logh"><span>기록</span>${AL.log.length ? '<button id="alLogClr">지우기</button>' : ''}</div>
+    <div id="alLog">${AL.log.slice(0, 30).map((l, i) => `<div class="al-lg" data-li="${i}"><span class="t">${fmtTime(l.t)}</span><span><b>${esc(l.symbol)}</b> ${esc(l.tf)} · ${esc(l.text)} <span class="m">@ ${esc(l.price)}</span></span></div>`).join('') || '<div class="al-empty" style="padding:10px">울린 알림이 여기에 남아요</div>'}</div>
+    <div class="al-note">앱(창)이 켜져 있는 동안 감시해요. 컴퓨터는 창을 내려놔도 되지만, 폰은 앱을 닫거나 오래 백그라운드에 두면 멈출 수 있어요.</div>`;
+}
+$('#alPane').addEventListener('click', e => {
+  const id = e.target.id;
+  if (id === 'alNew') return openAlertModal();
+  if (id === 'alPerm') return askNotifyPermission();
+  if (id === 'alDev') { LS.set('alerts:device', !alertsDevice()); renderAlerts(); return; }
+  if (id === 'alLogClr') { AL.log = []; LS.set('alertLog', []); renderAlerts(); return; }
+  const lg = e.target.closest('[data-li]'); if (lg) { goAlertChart(AL.log[+lg.dataset.li]); return; }
+  const row = e.target.closest('[data-aid]'); if (!row) return;
+  const a = AL.list.find(x => x.id === row.dataset.aid); if (!a) return;
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (act === 'toggle') { a.on = !a.on; if (a.on) delete AL.rt[a.id]; alertsChanged(); }
+  else if (act === 'del') { AL.list = AL.list.filter(x => x !== a); delete AL.rt[a.id]; alertsChanged(); }
+  else if (act === 'edit') openAlertModal({ edit: a });
+  else goAlertChart(a);
+});
+setInterval(() => { if (rTab === 'al' && !document.hidden) renderAlerts(); }, 30000);
+
+// ── 알림 만들기 / 수정 창 ──
+let alDraft = null;
+function chartIndsFor(cell) { return (cell ? cell.st.main : []).filter(n => LINE_SRC[n]); }
+function paramsOf(cell, n) { return (cell && cell.st.params[n]) || IND_DEF_PARAMS[n]; }
+function openAlertModal(opt = {}) {
+  closeMenus(); closeSheets && closeSheets();
+  const cell = activeCell();
+  if (opt.edit) alDraft = clone(opt.edit);
+  else {
+    const st = cell.st, price = opt.price ?? (cell.lastBar ? cell.lastBar.close : 0);
+    alDraft = { market: st.market, symbol: st.symbol, tf: st.tf, kind: 'price', op: 'cross', tgt: { type: 'value', v: +(+price).toFixed(cell.pp) }, amt: 1, bars: 1, freq: 'once', msg: '', sound: true, on: true };
+    if (opt.draw) {
+      alDraft.tgt = { type: 'draw', key: opt.draw.key, uid: opt.draw.uid, name: opt.draw.name };
+      alDraft.op = DRAW_CH.includes(opt.draw.name) ? 'enterCh' : 'cross';
+    }
+  }
+  renderAlertModal();
+  $('#alModal').classList.add('show');
+}
+function renderAlertModal() {
+  const d = alDraft, cell = activeCell(), pp = (infoCache[d.market + ':' + d.symbol] || {}).pp ?? cell.pp;
+  const inds = chartIndsFor(cell.st.market === d.market && cell.st.symbol === d.symbol ? cell : cell);
+  const opt = (v, t, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(t)}</option>`;
+  const srcVal = d.kind === 'ind' ? 'ind:' + d.ind : 'price';
+  const isDraw = d.tgt && d.tgt.type === 'draw';
+  const drawCh = isDraw && DRAW_CH.includes(d.tgt.name);
+  let html = `<div class="ar"><label>종목</label><div><b>${esc(d.symbol)}</b> <span class="m">${MARKETS[d.market].badge}</span></div></div>
+    <div class="ar"><label>타임프레임</label><select id="afTf">${TF_SHOW.map(t => opt(t, t, d.tf)).join('')}</select></div>
+    <div class="ar"><label>조건</label><select id="afSrc">${opt('price', '가격', srcVal)}${Object.keys(IND_CONDS).map(n => opt('ind:' + n, IND_NAMES[n], srcVal)).join('')}</select></div>`;
+  if (d.kind === 'ind') {
+    html += `<div class="ar"><label></label><select id="afCond">${IND_CONDS[d.ind].map(([k, t]) => opt(k, t, d.cond)).join('')}</select></div>`;
+  } else {
+    const ops = isDraw ? (drawCh ? CH_OPS : LINE_OPS) : [...LINE_OPS, ...CH_OPS, ...MOVE_OPS];
+    html += `<div class="ar"><label></label><select id="afOp">${ops.map(o => opt(o, AL_OPS[o], d.op)).join('')}</select></div>`;
+    if (LINE_OPS.includes(d.op)) {
+      const tv = d.tgt.type === 'value' ? 'value' : d.tgt.type === 'draw' ? 'draw' : `line:${d.tgt.ind}:${d.tgt.key}`;
+      html += `<div class="ar"><label>기준</label><select id="afTgt">${isDraw ? opt('draw', '작도: ' + (TK.NAMES[d.tgt.name] || ''), tv) : opt('value', '값 (직접 입력)', tv) +
+        inds.map(n => LINE_SRC[n](paramsOf(cell, n)).map(x => opt(`line:${n}:${x.key}`, x.label, tv)).join('')).join('')}</select></div>`;
+      if (d.tgt.type === 'value') html += `<div class="ar"><label>값</label><input id="afV" type="number" step="any" value="${d.tgt.v}"></div>`;
+    } else if (CH_OPS.includes(d.op)) {
+      const tv = d.tgt.type === 'chv' ? 'chv' : d.tgt.type === 'draw' ? 'draw' : 'chind:' + d.tgt.ind;
+      html += `<div class="ar"><label>채널</label><select id="afTgt">${isDraw ? opt('draw', '작도: ' + (TK.NAMES[d.tgt.name] || ''), tv) : opt('chv', '직접 입력 (위·아래 값)', tv) +
+        inds.filter(n => CH_SRC[n]).map(n => opt('chind:' + n, CH_SRC[n][2], tv)).join('')}</select></div>`;
+      if (d.tgt.type === 'chv') html += `<div class="ar"><label>위 / 아래</label><div class="two"><input id="afUp" type="number" step="any" value="${d.tgt.up}"><input id="afDn" type="number" step="any" value="${d.tgt.dn}"></div></div>`;
+    } else {
+      html += `<div class="ar"><label>${d.op.endsWith('Pct') ? '변화 %' : '변화 가격'}</label><input id="afAmt" type="number" step="any" min="0" value="${d.amt}"></div>
+        <div class="ar"><label>봉 개수</label><input id="afBars" type="number" step="1" min="1" value="${d.bars}"></div>`;
+    }
+  }
+  html += `<div class="ar"><label>빈도</label><select id="afFreq">${Object.entries(AL_FREQ).map(([k, t]) => opt(k, t, d.freq)).join('')}</select></div>
+    <div class="ar"><label>메시지</label><input id="afMsg" type="text" placeholder="${esc(describeAlert(d))}" value="${esc(d.msg || '')}"></div>
+    <div class="ar"><label>알림 방식</label><div><label class="ck"><input type="checkbox" id="afSound" ${d.sound !== false ? 'checked' : ''}> 소리</label><span class="m">+ 팝업 · 시스템 알림</span></div></div>`;
+  $('#alBody').innerHTML = html;
+  $('#alTitle').textContent = d.id ? '알림 수정' : '알림 만들기';
+  $('#alOk').textContent = d.id ? '저장' : '만들기';
+  void pp;
+}
+function readAlertForm() {
+  const d = alDraft, cell = activeCell(), v = id => $(id) ? $(id).value : null;
+  d.tf = v('#afTf') || d.tf;
+  const src = v('#afSrc');
+  if (src && src.startsWith('ind:')) {
+    const n = src.slice(4);
+    if (d.kind !== 'ind' || d.ind !== n) { d.kind = 'ind'; d.ind = n; d.params = paramsOf(cell, n); d.cond = IND_CONDS[n][0][0]; if (d.freq === 'once') d.freq = 'bar'; }
+    else d.cond = v('#afCond') || d.cond;
+  } else if (src === 'price') {
+    if (d.kind === 'ind') { d.kind = 'price'; d.op = 'cross'; d.tgt = { type: 'value', v: cell.lastBar ? +cell.lastBar.close.toFixed(cell.pp) : 0 }; d.freq = 'once'; }
+    else {
+      const prevOp = d.op; d.op = v('#afOp') || d.op;
+      const grp = o => LINE_OPS.includes(o) ? 'l' : CH_OPS.includes(o) ? 'c' : 'm';
+      const price = cell.lastBar ? cell.lastBar.close : 0;
+      if (d.tgt.type !== 'draw' && grp(prevOp) !== grp(d.op)) {
+        if (grp(d.op) === 'l') d.tgt = { type: 'value', v: +price.toFixed(cell.pp) };
+        else if (grp(d.op) === 'c') d.tgt = { type: 'chv', up: +(price * 1.01).toFixed(cell.pp), dn: +(price * 0.99).toFixed(cell.pp) };
+      } else if (d.tgt.type !== 'draw') {
+        const tv = v('#afTgt');
+        if (tv === 'value') d.tgt = { type: 'value', v: d.tgt.type === 'value' ? +v('#afV') : +price.toFixed(cell.pp) };
+        else if (tv && tv.startsWith('line:')) { const [, n, key] = tv.split(':'); d.tgt = { type: 'line', ind: n, key, params: paramsOf(cell, n) }; }
+        else if (tv === 'chv') d.tgt = d.tgt.type === 'chv' ? { type: 'chv', up: +v('#afUp'), dn: +v('#afDn') } : { type: 'chv', up: +(price * 1.01).toFixed(cell.pp), dn: +(price * 0.99).toFixed(cell.pp) };
+        else if (tv && tv.startsWith('chind:')) { const n = tv.slice(6); d.tgt = { type: 'chind', ind: n, params: paramsOf(cell, n) }; }
+      }
+      if ($('#afAmt')) d.amt = Math.max(0, +v('#afAmt') || 0);
+      if ($('#afBars')) d.bars = Math.max(1, Math.round(+v('#afBars') || 1));
+    }
+  }
+  d.freq = v('#afFreq') || d.freq;
+  d.msg = (v('#afMsg') || '').trim();
+  d.sound = $('#afSound') ? $('#afSound').checked : d.sound;
+}
+$('#alBody').addEventListener('change', () => { readAlertForm(); renderAlertModal(); });
+$('#alOk').onclick = () => {
+  readAlertForm();
+  const d = alDraft;
+  if (d.kind === 'price' && d.tgt.type === 'value' && !(d.tgt.v > 0)) return toast('값을 입력해 주세요');
+  if (d.kind === 'price' && MOVE_OPS.includes(d.op) && !(d.amt > 0)) return toast('변화량을 입력해 주세요');
+  if (d.id) { const i = AL.list.findIndex(x => x.id === d.id); if (i >= 0) AL.list[i] = { ...d, on: true }; delete AL.rt[d.id]; }
+  else AL.list.unshift({ ...d, id: alUid(), created: Date.now(), on: true });
+  $('#alModal').classList.remove('show');
+  alertsChanged();
+  toast(d.id ? '알림을 고쳤어요' : '알림을 만들었어요 ⏰');
+  askNotifyPermission();
+};
+$('#alCancel').onclick = $('#alClose').onclick = () => $('#alModal').classList.remove('show');
+$('#alModal').addEventListener('click', e => { if (e.target.id === 'alModal') $('#alModal').classList.remove('show'); });
+$('#btnAlert').onclick = () => {
+  if (L.wlOpen && rTab === 'al') { L.wlOpen = false; } else { L.wlOpen = true; setRTab('al'); }
+  saveLayout(); applyWl();
+};
+// 선택한 작도에 알림 걸기
+function alertSelectedDrawing() {
+  const o = selOverlay(); if (!o) return;
+  if (!DRAW_LINE.includes(o.name) && !DRAW_CH.includes(o.name)) return toast('이 작도는 알림을 걸 수 없어요 (선·수평선·채널·사각형만)');
+  const cell = sel.cell;
+  cell.saveDrawings(); // 작도 번호(uid)를 저장해 두기
+  openAlertModal({ draw: { key: cell.drawKey(), uid: o.extendData.uid, name: o.name } });
+}
+$('#dbAlert').addEventListener('click', alertSelectedDrawing);
+
+// 차트 우클릭 메뉴: 그 가격에 알림
+function openCtxMenu(cell, ev) {
+  const r = cell.cv.getBoundingClientRect();
+  const pt = cell.chart.convertFromPixel([{ x: ev.clientX - r.left, y: ev.clientY - r.top }], { paneId: 'candle_pane' })[0];
+  if (!pt || pt.value == null || isNaN(pt.value)) return;
+  const price = +(+pt.value).toFixed(cell.pp), m = $('#ctxMenu');
+  m.innerHTML = `<div class="row" data-cx="quick">⏰ ${fmtPrice(price, cell.pp)} 크로싱 알림 바로 추가</div>
+    <div class="row" data-cx="dlg">⏰ 알림 만들기… <span class="m">Alt+A</span></div>
+    <div class="hr"></div><div class="row" data-cx="list">알림 목록 보기</div>`;
+  m.dataset.price = price;
+  m.classList.add('show');
+  m.style.left = Math.min(ev.clientX, innerWidth - m.offsetWidth - 6) + 'px';
+  m.style.top = Math.min(ev.clientY, innerHeight - m.offsetHeight - 6) + 'px';
+}
+$('#ctxMenu').addEventListener('click', e => {
+  e.stopPropagation();
+  const r = e.target.closest('[data-cx]'); if (!r) return;
+  const price = +$('#ctxMenu').dataset.price, cell = activeCell(), st = cell.st;
+  closeMenus();
+  if (r.dataset.cx === 'quick') {
+    AL.list.unshift({ id: alUid(), created: Date.now(), on: true, market: st.market, symbol: st.symbol, tf: st.tf, kind: 'price', op: 'cross', tgt: { type: 'value', v: price }, freq: 'once', msg: '', sound: true });
+    alertsChanged(); toast(`${fmtPrice(price, cell.pp)} 크로싱 알림 추가 ⏰`); askNotifyPermission();
+  } else if (r.dataset.cx === 'dlg') openAlertModal({ price });
+  else { L.wlOpen = true; setRTab('al'); saveLayout(); applyWl(); if (isMobile()) setView('watch'); }
+});
+
+// 차트 위 알림 가격선 (끌어서 가격 바꾸기)
+klinecharts.registerOverlay({
+  name: 'alertLine', totalStep: 2, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: true,
+  createPointFigures: ({ coordinates: c, bounding, overlay: o }) => !c.length ? [] : [
+    { type: 'line', attrs: { coordinates: [{ x: 0, y: c[0].y }, { x: bounding.width, y: c[0].y }] }, styles: { style: 'dashed', dashedValue: [4, 4], color: '#ff9800', size: 1 } },
+    { type: 'text', ignoreEvent: true, attrs: { x: bounding.width - 8, y: c[0].y - 3, text: '⏰ ' + ((o.extendData && o.extendData.text) || ''), align: 'right', baseline: 'bottom' },
+      styles: { color: '#ff9800', backgroundColor: 'transparent', borderSize: 0, size: 11, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0 } }
+  ]
+});
 
 // ───────── 기기 동기화 (깃허브 Gist에 저장) ─────────
 const Sync = (() => {
   // 동기화 규칙: ① 항상 먼저 받아오고 그다음 올림 ② 시계 대신 버전 번호(v)로 판단
   // ③ 저장 항목(관심종목·레이아웃·종목별 작도·도구 스타일…)마다 따로 비교해서 바뀐 것만 반영
   // ④ 같은 항목을 양쪽에서 바꿨으면 나중에 바꾼 쪽 우선
-  const SYNC_KEY = /^(layouts|layout:|draw:|watchlist|toolStyle:|groupCur)/; // curLayout은 기기마다 따로
+  const SYNC_KEY = /^(layouts|layout:|draw:|watchlist|toolStyle:|groupCur|alerts$)/; // curLayout은 기기마다 따로
   const FILE = 'my-chart-sync.json', DESC = 'my-chart sync (내 차트 동기화 데이터)';
   const API = 'https://api.github.com';
   let busy = false, timer = null, timer2 = null, started = false, again = false;
@@ -1876,6 +2690,7 @@ const Sync = (() => {
     const keys = Object.keys(changes); if (!keys.length) return;
     keys.forEach(k => changes[k] == null ? localStorage.removeItem(k) : localStorage.setItem(k, changes[k]));
     if (keys.includes('watchlist')) { watchlist = LS.get('watchlist', []); renderWatchlist(); connectWatchlist(); }
+    if (keys.includes('alerts')) { AL.list = LS.get('alerts', []); AL.rt = {}; renderAlerts(); syncFeeds(); cells.forEach(c => c.renderAlertMarks()); }
     if (keys.includes('groupCur')) { Object.keys(groupCur).forEach(k => delete groupCur[k]); Object.assign(groupCur, LS.get('groupCur', {})); renderLeft(); }
     if (keys.includes('layouts') || keys.includes('layout:' + curLayout)) {
       layouts = LS.get('layouts', layouts);
@@ -1984,12 +2799,6 @@ const Sync = (() => {
   return Object.assign(api, { token, meta, connect, sync, pull: f => sync(f), push: () => sync(), disconnect, init });
 })();
 
-// 리플레이 중 Shift+→ : 차트 기본 단축키(화면 스크롤)보다 먼저 가로채서 한 봉만 진행
-window.addEventListener('keydown', e => {
-  if (!R.on || !e.shiftKey || e.key !== 'ArrowRight') return;
-  const tag = (e.target.tagName || '').toLowerCase(); if (tag === 'input' || tag === 'select') return;
-  e.preventDefault(); e.stopImmediatePropagation(); replayStep();
-}, true);
 // 24시간 등락 기준값 1분마다 새로 고침
 setInterval(() => { if (!document.hidden) cells.forEach(c => c.fetch24()); }, 60000);
 
@@ -2042,6 +2851,8 @@ $('#toolSheet').addEventListener('click', e => {
 function renderMoreSheet() {
   const n = GRIDS[L.grid];
   $('#moreSheet').innerHTML = `<div class="grab"></div>
+    <div class="mrow" data-m="alert">⏰ 알림 만들기</div>
+    <div class="mrow" data-m="alerts">🔔 알림 목록${AL.list.filter(a => a.on).length ? ` · ${AL.list.filter(a => a.on).length}개 켜짐` : ''}</div>
     <div class="mrow" data-m="replay">⏪ ${R.on ? '리플레이 종료' : '리플레이'}</div>
     <div class="mrow" data-m="settings">⚙ 차트 설정</div>
     <div class="mrow" data-m="layout">▦ 레이아웃 · <b>${esc(layoutName())}</b></div>
@@ -2052,6 +2863,8 @@ $('#moreSheet').addEventListener('click', e => {
   const r = e.target.closest('[data-m]'); if (!r) return;
   const m = r.dataset.m; closeSheets(); setView('chart');
   if (m === 'replay') R.on ? exitReplay() : beginPick();
+  else if (m === 'alert') openAlertModal();
+  else if (m === 'alerts') { setRTab('al'); setView('watch'); }
   else if (m === 'settings') openSetModal();
   else if (m === 'layout') setTimeout(() => toggleMenu($('#layMenu'), $('#symBtn'), renderLayMenu), 0);
   else if (m === 'grid') setTimeout(() => toggleMenu($('#gridMenu'), $('#symBtn'), renderGridMenu), 0);
@@ -2103,6 +2916,7 @@ let fitTimer;
 new ResizeObserver(() => { cells.forEach(c => c.chart.resize()); clearTimeout(fitTimer); fitTimer = setTimeout(() => cells.forEach(c => c.fitPanes()), 150); }).observe($('#grid'));
 connectWatchlist();
 renderLeft();
+renderAlerts(); syncFeeds();
 document.body.classList.toggle('mobile', isMobile()); renderNav();
 loadLayout(curLayout);
 applyMobile();
@@ -2110,6 +2924,7 @@ if (innerWidth < 700 && !LS.get('seen', false)) { L.wlOpen = false; applyWl(); }
 LS.set('seen', true);
 Sync.init();
 if (MOCK) toast('테스트 모드 (가짜 데이터)');
+window.__AL = AL; window.__feeds = Feeds; window.__alertsChanged = alertsChanged;
 window.__cells = () => cells; window.__L = () => L; window.__sync = Sync;
 Object.defineProperty(window, '__chart', { get: () => activeCell().chart });
 })();

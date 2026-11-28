@@ -335,7 +335,7 @@ const HINTS = {
   elliottImpulse: '0 → 1 → 2 → 3 → 4 → 5 순서로 6번 클릭', elliottCorrection: '0 → A → B → C 4번 클릭', elliottTriangle: '6번 클릭',
   elliottDoubleCombo: '4번 클릭', elliottTripleCombo: '6번 클릭', brush: '누른 채로 드래그해서 그리기'
 };
-const SHORTCUTS = { segment: 'Alt+T', horizontalStraightLine: 'Alt+H', horizontalRayLine: 'Alt+J', verticalStraightLine: 'Alt+V', crossLine: 'Alt+C', fibonacciLine: 'Alt+F', rectBox: 'Alt+R' };
+const SHORTCUTS = { segment: 'Alt+T', horizontalStraightLine: 'Alt+H', horizontalRayLine: 'Alt+J', verticalStraightLine: 'Alt+V', crossLine: 'Alt+C', fibonacciLine: 'Alt+F', rectBox: 'Alt+Shift+R' };
 const GROUPS = [
   { id: 'lines', title: '선', tools: ['segment', 'rayLine', 'straightLine', 'infoLine', 'trendAngle', 'arrowLine', 'horizontalStraightLine', 'horizontalRayLine', 'verticalStraightLine', 'crossLine'] },
   { id: 'channels', title: '채널', tools: ['parallelChannel', 'regressionTrend', 'flatTopBottom', 'disjointChannel'] },

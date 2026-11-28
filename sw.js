@@ -1,5 +1,5 @@
 // 앱 화면 파일을 저장해 두고, 새 버전이 있으면 자동으로 받아옴 (시세 데이터는 저장 안 함)
-const CACHE = 'my-chart-v13';
+const CACHE = 'my-chart-v14';
 const SHELL = ['./', 'index.html', 'app.js', 'candlemaster.js', 'tools.js', 'klinecharts.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
@@ -12,4 +12,12 @@ self.addEventListener('fetch', e => {
   e.respondWith(fetch(e.request).then(r => {
     const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r;
   }).catch(() => caches.match(e.request).then(r => r || caches.match('index.html'))));
+});
+// 알림을 누르면 앱 창을 앞으로
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+    for (const c of cs) if ('focus' in c) return c.focus();
+    return self.clients.openWindow('./');
+  }));
 });

@@ -160,6 +160,8 @@
   #indEdit .sec{color:var(--muted);font-size:11px;margin:14px 0 6px}
   #indEdit .prm{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   #indEdit .prm input{width:64px}
+  #indEdit .prm label.pb{display:flex;align-items:center;gap:6px;flex:1 1 100%;padding:3px 0}
+  #indEdit .prm label.pb input{width:auto;margin:0}
   #indEdit .ln{display:grid;grid-template-columns:110px 40px 90px;gap:8px;align-items:center;margin-bottom:6px}
   #indEdit .empty{color:var(--muted);margin-top:40px;text-align:center}
   #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#000c;color:#fff;padding:8px 14px;border-radius:6px;z-index:99;opacity:0;transition:opacity .2s;pointer-events:none}
@@ -220,6 +222,59 @@
   .sheet .mrow:last-child{border-bottom:0}
   #sheetDim{position:fixed;inset:0;z-index:54;background:rgba(0,0,0,.4);display:none}
   #sheetDim.show{display:block}
+
+  /* 오른쪽 패널 탭 · 알림 */
+  #rtabs{display:flex;border-bottom:1px solid var(--line);flex:none}
+  #rtabs button{flex:1;border-radius:0;padding:9px 0;font-weight:600;color:var(--muted)}
+  #rtabs button.on{color:var(--text);box-shadow:inset 0 -2px 0 var(--accent);background:none}
+  #alCnt{display:inline-block;min-width:16px;font-size:11px;background:var(--accent);color:#fff;border-radius:8px;padding:0 4px;margin-left:2px}
+  #alCnt:empty{display:none}
+  .rpane{display:flex;flex-direction:column;flex:1;min-height:0;overflow-y:auto}
+  #wlPane #wl{flex:1}
+  #alPane h3 span{display:flex;gap:2px}
+  #alPane h3 button{padding:4px 6px;font-size:12px}
+  .al-row{display:flex;gap:6px;padding:8px 8px 8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+  .al-row:hover{background:var(--panel2)}
+  .al-row.off{opacity:.5}
+  .al-main{flex:1;min-width:0}
+  .al-s{font-weight:600;font-size:12px}
+  .al-d{font-size:12px;margin-top:2px;word-break:break-all}
+  .al-m{font-size:11px;color:var(--muted);margin-top:2px}
+  .al-b{display:flex;align-items:flex-start;gap:0}
+  .al-b button{padding:2px 6px;color:var(--muted)} .al-b button:hover{color:var(--text)}
+  .al-empty{color:var(--muted);padding:16px 12px;font-size:12px;line-height:1.6}
+  .al-note{color:var(--muted);font-size:11px;padding:8px 12px;line-height:1.5}
+  .al-note button{border:1px solid var(--accent);color:var(--accent);padding:2px 6px;font-size:11px}
+  .al-logh{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 4px;color:var(--muted);font-size:11px;font-weight:600}
+  .al-logh button{font-size:11px;padding:1px 6px;color:var(--muted)}
+  .al-lg{display:flex;gap:8px;padding:4px 12px;font-size:11px;cursor:pointer;line-height:1.4} .al-lg:hover{background:var(--panel2)}
+  .al-lg .t{color:var(--muted);flex:none;font-variant-numeric:tabular-nums}
+  #alBox{width:min(440px,96vw);max-height:92vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #alBox .hd{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--line);font-weight:700}
+  #alBody{padding:10px 16px;overflow-y:auto}
+  #alBody .ar{display:grid;grid-template-columns:84px 1fr;gap:10px;align-items:center;padding:5px 0}
+  #alBody .ar>label:first-child{color:var(--muted);font-size:12px}
+  #alBody select,#alBody input[type=number],#alBody input[type=text]{width:100%;padding:6px 8px}
+  #alBody .two{display:flex;gap:6px} #alBody .ck{display:inline-flex;gap:4px;align-items:center;margin-right:8px}
+  #alBox .ft{display:flex;justify-content:flex-end;gap:6px;padding:10px 12px;border-top:1px solid var(--line)}
+  #alBox .ft button{border:1px solid var(--line);padding:6px 14px}
+  button.pri{background:var(--accent)!important;color:#fff;border-color:var(--accent)!important}
+  #alPops{position:fixed;right:12px;top:52px;z-index:70;display:flex;flex-direction:column;gap:8px;width:min(320px,92vw)}
+  .alpop{background:var(--panel);border:1px solid #ff9800;border-left:4px solid #ff9800;border-radius:8px;padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.45);font-size:13px;animation:popin .25s ease-out}
+  .alpop .ah{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
+  .alpop .ax{padding:0 4px;color:var(--muted)} .alpop .am{color:var(--muted);font-size:11px;margin-top:3px}
+  .alpop .ab{display:flex;justify-content:flex-end;margin-top:4px} .alpop .ab button{font-size:12px;color:var(--accent);padding:2px 6px}
+  @keyframes popin{from{transform:translateX(30px);opacity:0}to{transform:none;opacity:1}}
+  #tfInput{min-width:200px;padding:8px}
+  #tfInput input{width:100%;font-size:16px;padding:6px 8px;margin-top:4px}
+  #grid.max{grid-template:1fr/1fr!important} #grid.max .cell:not(.act){display:none} #grid.max .cell.act{grid-row:auto!important}
+  body.mobile #alPops{top:auto;bottom:calc(66px + env(safe-area-inset-bottom));left:8px;right:8px;width:auto}
+  body.mobile .al-row{padding:12px 10px 12px 14px} body.mobile .al-s,body.mobile .al-d{font-size:14px}
+  body.mobile #alBox{width:100vw;height:100%;max-height:none;border-radius:0}
+  body.mobile #alBody .ar{grid-template-columns:90px 1fr;padding:7px 0}
+  body.mobile #alBody select,body.mobile #alBody input{font-size:15px;padding:8px}
+  body.mobile #rtabs button{padding:12px 0;font-size:14px}
+  body.mobile .al-b button{font-size:18px;padding:4px 9px}
 </style>
 </head>
 <body>
@@ -242,6 +297,7 @@
     <button id="btnSettings" class="donly">⚙ 설정</button>
     <button id="btnGrid" class="donly" title="화면 분할">⊞ 분할</button>
     <button id="btnWl" class="donly">☰ 관심</button>
+    <button id="btnAlert" class="donly" title="알림 (Alt+A로 만들기)">⏰ 알림</button>
   </div>
   <div id="left"></div>
   <div id="center">
@@ -257,6 +313,7 @@
       <label id="dbFillW" class="stl" title="배경 진하기">▨<input type="range" id="dbFill" min="0" max="0.6" step="0.02"></label>
       <span class="vs"></span>
       <button id="dbClone" title="복제">⧉</button>
+      <button id="dbAlert" title="이 작도에 알림 걸기">⏰</button>
       <button id="dbDel" title="삭제 (Delete)">🗑</button>
     </div>
     <div id="hint"><span id="hintText"></span><span id="hintExtra"></span><button id="hintCancel">취소</button></div>
@@ -273,8 +330,10 @@
     </div>
   </div>
   <div id="right">
-    <h3>관심종목 <button id="wlAdd" title="현재 종목 추가">＋ 추가</button></h3>
-    <div id="wl"></div>
+    <div id="rtabs"><button data-rt="wl">관심종목</button><button data-rt="al">알림 <span id="alCnt"></span></button></div>
+    <div id="wlPane" class="rpane"><h3>관심종목 <button id="wlAdd" title="현재 종목 추가 (Alt+W)">＋ 추가</button></h3>
+    <div id="wl"></div></div>
+    <div id="alPane" class="rpane" style="display:none"></div>
   </div>
   <nav id="mnav" class="monly"></nav>
 </div>
@@ -309,6 +368,16 @@
 <div class="sheet" id="toolSheet"></div>
 <div class="sheet" id="moreSheet"></div>
 <div class="menu" id="tfMenu"></div>
+<div id="alModal" class="modal">
+  <div id="alBox">
+    <div class="hd"><span id="alTitle">알림 만들기</span><button id="alClose">✕</button></div>
+    <div id="alBody"></div>
+    <div class="ft"><button id="alCancel">취소</button><button id="alOk" class="pri">만들기</button></div>
+  </div>
+</div>
+<div class="menu" id="ctxMenu"></div>
+<div class="menu" id="tfInput"><div class="t">타임프레임 바꾸기</div><input id="tfInputBox" type="text" spellcheck="false" autocomplete="off" placeholder="예: 5, 60, 4h, 1d"><div class="m" style="padding:4px 2px 0">숫자만 = 분 · Enter로 적용</div></div>
+<div id="alPops"></div>
 <div id="toast"></div>
 
 <script src="klinecharts.min.js"></script>
